@@ -51,7 +51,8 @@ function M.open(config)
           local sel = action_state.get_selected_entry().value
           if sel.type == "adapter" then
             local adapter = config.adapters[sel.name]
-            session.create(adapter, nil, config)
+            local n = #session._all() + 1
+            session.create(adapter, sel.name .. " " .. n, config)
           end
         end)
         return true
@@ -67,7 +68,8 @@ function M.open(config)
         if e.display == choice then
           if e.type == "adapter" then
             local adapter = config.adapters[e.name]
-            session.create(adapter, nil, config)
+            local n = #session._all() + 1
+            session.create(adapter, e.name .. " " .. n, config)
           end
           break
         end
