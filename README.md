@@ -104,28 +104,29 @@ Drop a file in `lua/neocode/adapters/` implementing this interface:
 local M = {}
 
 M.name          = "myai"
-M.session_store = true  -- set false if the CLI manages its own history
+M.session_store = true  -- set false to skip persisting this adapter's sessions to disk
 
--- Return the command spec to launch a new session
+-- (Required) Return the command spec to launch a new session
 function M.launch_cmd(opts)
   -- opts: { cwd, name }
   return { cmd = "myai", args = { "--name", opts.name }, cwd = opts.cwd }
 end
 
--- Return the command spec to open the resume/history picker
-function M.resume_cmd(opts)
-  -- opts: { cwd }
-  return { cmd = "myai", args = { "--resume" }, cwd = opts.cwd }
-end
-
--- Send Ctrl-C to interrupt a running response
+-- (Required) Send Ctrl-C to interrupt a running response
 function M.interrupt(session)
   vim.fn.chansend(session.job_id, "\x03")
 end
 
--- Send an image path to the CLI input
+-- (Required) Send an image path to the CLI input
 function M.attach_image(session, path)
   vim.fn.chansend(session.job_id, path .. "\n")
+end
+
+-- (Optional) Return the command spec for the CLI's native session picker.
+-- If provided, the `h` keymap will open it. If omitted, `h` shows a warning.
+function M.resume_cmd(opts)
+  -- opts: { cwd }
+  return { cmd = "myai", args = { "--resume" }, cwd = opts.cwd }
 end
 
 return M
