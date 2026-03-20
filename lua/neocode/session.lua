@@ -331,7 +331,7 @@ function M._register_buf_keymaps(buf, record, config)
     local spec = adapter.resume_cmd({ cwd = vim.fn.getcwd() })
     local new_record = M._new_record(record.adapter, "Resume")
     M._add(new_record)
-    vim.cmd("vsplit")
+    -- Replace current window instead of spawning a new split
     local win = vim.api.nvim_get_current_win()
     local buf = vim.api.nvim_create_buf(false, false)
     vim.api.nvim_win_set_buf(win, buf)
