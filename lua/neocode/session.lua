@@ -120,6 +120,9 @@ function M._create_with_title(adapter, title, config)
   record.winid  = win
   record.job_id = job_id
 
+  -- Set a persistent keymap hint as the winbar of the chat window
+  vim.wo[win].winbar = config.winbar or ""
+
   -- Register buffer-local keymaps for this session
   M._register_buf_keymaps(buf, record, config)
 
@@ -349,6 +352,7 @@ function M._register_buf_keymaps(buf, record, config)
     new_record.bufnr  = buf
     new_record.winid  = win
     new_record.job_id = job_id
+    vim.wo[win].winbar = config.winbar or ""
     M._register_buf_keymaps(buf, new_record, config)
     M._persist(config)
     vim.cmd("startinsert")

@@ -2,9 +2,8 @@ local M = {}
 
 function M.open(config)
   local session  = require("neocode.session")
-  local history  = require("neocode.history")
 
-  -- Build options: one entry per configured adapter + "Resume session..."
+  -- Build options: one entry per configured adapter
   local entries = {}
 
   local adapter_order = {}
@@ -22,8 +21,6 @@ function M.open(config)
     table.insert(entries, { type = "adapter", name = name, display = label })
   end
 
-  table.insert(entries, { type = "history", display = "  Resume session..." })
-
   local ok_tel, pickers = pcall(require, "telescope.pickers")
 
   if ok_tel then
@@ -32,7 +29,14 @@ function M.open(config)
     local actions      = require("telescope.actions")
     local action_state = require("telescope.actions.state")
 
-    pickers.new({}, {
+    pickers.new({
+      layout_strategy = "center",
+      layout_config   = {
+        width  = 40,
+        height = #entries + 4,
+        preview_cutoff = 1,
+      },
+    }, {
       prompt_title = "NeoCode",
       finder = finders.new_table({
         results = entries,
@@ -48,8 +52,6 @@ function M.open(config)
           if sel.type == "adapter" then
             local adapter = config.adapters[sel.name]
             session.create(adapter, nil, config)
-          elseif sel.type == "history" then
-            vim.schedule(function() history.pick(config) end)
           end
         end)
         return true
@@ -66,8 +68,6 @@ function M.open(config)
           if e.type == "adapter" then
             local adapter = config.adapters[e.name]
             session.create(adapter, nil, config)
-          elseif e.type == "history" then
-            history.pick(config)
           end
           break
         end

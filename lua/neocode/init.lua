@@ -8,6 +8,7 @@ local DEFAULT_CONFIG = {
   keymap_prefix      = "<leader>ai",
   data_dir           = vim.fn.stdpath("data") .. "/neocode",
   telescope_fallback = true,
+  winbar             = "  ? help  h resume  i input  <leader>p image  <C-c> stop  { } cycle",
   adapters           = {},
 }
 
