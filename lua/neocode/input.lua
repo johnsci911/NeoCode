@@ -49,14 +49,12 @@ function M.open(session, config)
     end
     vim.api.nvim_win_close(win, true)
     vim.schedule(function()
-      -- Focus terminal buffer and enter terminal mode
       if session.bufnr and vim.api.nvim_buf_is_valid(session.bufnr) then
         vim.api.nvim_set_current_buf(session.bufnr)
       end
+      -- `mode` redraws the screen and notifies the terminal of its correct size
+      vim.cmd("mode")
       vim.cmd("startinsert")
-      vim.cmd("redraw!")
-      -- Paste into CLI input field without submitting (no trailing \n)
-      -- Internal newlines become spaces — Claude CLI submits on \n
       local pasted = text:gsub("\n", " ")
       vim.fn.chansend(session.job_id, pasted)
     end)
