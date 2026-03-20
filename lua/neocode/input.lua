@@ -49,16 +49,16 @@ function M.open(session, config)
     end
     vim.api.nvim_win_close(win, true)
     vim.schedule(function()
-      -- Switch to the terminal buffer and enter terminal mode
+      -- Focus terminal buffer and enter terminal mode
       if session.bufnr and vim.api.nvim_buf_is_valid(session.bufnr) then
         vim.api.nvim_set_current_buf(session.bufnr)
       end
       vim.cmd("startinsert")
       vim.cmd("redraw!")
-      -- Feed text as keypresses into the terminal (appears in CLI input field)
-      -- Newlines become Shift+Enter (Claude CLI line continuation) except the last
-      local escaped = vim.api.nvim_replace_termcodes(text, true, false, true)
-      vim.api.nvim_feedkeys(escaped, "t", false)
+      -- Paste into CLI input field without submitting (no trailing \n)
+      -- Internal newlines become spaces — Claude CLI submits on \n
+      local pasted = text:gsub("\n", " ")
+      vim.fn.chansend(session.job_id, pasted)
     end)
   end
 
