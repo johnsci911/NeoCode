@@ -1,24 +1,25 @@
 local M = {}
 
 function M.open(config)
-  local session  = require("neocode.session")
-
-  -- Build options: one entry per configured adapter
-  local entries = {}
+  local session = require("neocode.session")
 
   local adapter_order = {}
-  for name, _ in pairs(config.adapters or {}) do
+  for name in pairs(config.adapters or {}) do
     table.insert(adapter_order, name)
   end
   table.sort(adapter_order)
 
+  local label_map = { claude = "  Claude CLI", opencode = "  OpenCode", gemini = "  Gemini CLI" }
+  local entries = {}
   for _, name in ipairs(adapter_order) do
-    local label = ({
-      claude   = "  Claude CLI",
-      opencode = "  OpenCode",
-      gemini   = "  Gemini CLI",
-    })[name] or ("  " .. name)
-    table.insert(entries, { type = "adapter", name = name, display = label })
+    local display = label_map[name] or ("  " .. name)
+    table.insert(entries, { name = name, display = display })
+  end
+
+  local function on_selected(e)
+    local adapter = config.adapters[e.name]
+    local n = #session._all() + 1
+    session.create(adapter, e.name .. " " .. n, config)
   end
 
   local ok_tel, pickers = pcall(require, "telescope.pickers")
@@ -31,11 +32,7 @@ function M.open(config)
 
     pickers.new({
       layout_strategy = "center",
-      layout_config   = {
-        width  = 40,
-        height = #entries + 4,
-        preview_cutoff = 1,
-      },
+      layout_config   = { width = 40, height = #entries + 4, preview_cutoff = 1 },
     }, {
       prompt_title = "NeoCode",
       finder = finders.new_table({
@@ -48,32 +45,20 @@ function M.open(config)
       attach_mappings = function(prompt_bufnr, _)
         actions.select_default:replace(function()
           actions.close(prompt_bufnr)
-          local sel = action_state.get_selected_entry().value
-          if sel.type == "adapter" then
-            local adapter = config.adapters[sel.name]
-            local n = #session._all() + 1
-            session.create(adapter, sel.name .. " " .. n, config)
-          end
+          on_selected(action_state.get_selected_entry().value)
         end)
         return true
       end,
     }):find()
   else
-    -- Fallback: vim.ui.select
     local labels = {}
-    for _, e in ipairs(entries) do table.insert(labels, e.display) end
+    local by_label = {}
+    for _, e in ipairs(entries) do
+      table.insert(labels, e.display)
+      by_label[e.display] = e
+    end
     vim.ui.select(labels, { prompt = "NeoCode" }, function(choice)
-      if not choice then return end
-      for _, e in ipairs(entries) do
-        if e.display == choice then
-          if e.type == "adapter" then
-            local adapter = config.adapters[e.name]
-            local n = #session._all() + 1
-            session.create(adapter, e.name .. " " .. n, config)
-          end
-          break
-        end
-      end
+      if choice then on_selected(by_label[choice]) end
     end)
   end
 end

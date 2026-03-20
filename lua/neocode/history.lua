@@ -4,26 +4,24 @@ local M = {}
 -- Actions: <CR> resume/switch, d delete, r rename, n new session
 function M.pick(config)
   local session = require("neocode.session")
-  local ok_tel, pickers    = pcall(require, "telescope.pickers")
+  local ok_tel, pickers = pcall(require, "telescope.pickers")
   if not ok_tel then
     vim.notify("neocode: telescope.nvim is required for history picker", vim.log.levels.ERROR)
     return
   end
 
-  local finders     = require("telescope.finders")
-  local conf        = require("telescope.config").values
-  local actions     = require("telescope.actions")
+  local finders      = require("telescope.finders")
+  local conf         = require("telescope.config").values
+  local actions      = require("telescope.actions")
   local action_state = require("telescope.actions.state")
 
   local function refresh_picker(prompt_bufnr)
-    -- Close and reopen to reflect changes
     actions.close(prompt_bufnr)
     vim.schedule(function() M.pick(config) end)
   end
 
   local function build_entries()
     local all = session.load_all_from_disk(config)
-    -- Also include currently active in-memory sessions
     local active_ids = {}
     for _, s in ipairs(session._all()) do
       active_ids[s.id] = true
@@ -32,20 +30,16 @@ function M.pick(config)
     for _, s in ipairs(all) do
       local is_active = active_ids[s.id] or s.status == "active"
       table.insert(entries, {
-        id           = s.id,
-        session_uuid = s.session_uuid,
-        adapter      = s.adapter,
-        title        = s.title,
-        status       = is_active and "active" or "closed",
-        created_at   = s.created_at,
-        display      = (is_active and "● " or "○ ") .. s.title .. "  [" .. s.adapter .. "]",
+        id         = s.id,
+        adapter    = s.adapter,
+        title      = s.title,
+        status     = is_active and "active" or "closed",
+        created_at = s.created_at,
+        display    = (is_active and "● " or "○ ") .. s.title .. "  [" .. s.adapter .. "]",
       })
     end
-    -- Sort: active first, then by created_at desc
     table.sort(entries, function(a, b)
-      if a.status ~= b.status then
-        return a.status == "active"
-      end
+      if a.status ~= b.status then return a.status == "active" end
       return a.created_at > b.created_at
     end)
     return entries
@@ -58,11 +52,7 @@ function M.pick(config)
     finder = finders.new_table({
       results = entries,
       entry_maker = function(entry)
-        return {
-          value   = entry,
-          display = entry.display,
-          ordinal = entry.title,
-        }
+        return { value = entry, display = entry.display, ordinal = entry.title }
       end,
     }),
     sorter = conf.generic_sorter({}),
@@ -75,66 +65,28 @@ function M.pick(config)
         local sel = entry.value
 
         if sel.status == "active" then
-          -- Switch to active buffer
           local active = session._get(sel.id)
           if active and active.bufnr and vim.api.nvim_buf_is_valid(active.bufnr) then
             vim.api.nvim_set_current_buf(active.bufnr)
           end
         else
-          -- Resume closed session with claude --resume <uuid>
           local adapter = config.adapters and config.adapters[sel.adapter]
           if not adapter or not adapter.resume_cmd then
             vim.notify("neocode: adapter '" .. sel.adapter .. "' does not support resume", vim.log.levels.ERROR)
             return
           end
-          -- Don't pass session_uuid — neocode's uuid was never given to Claude.
-          -- claude --resume (no args) opens Claude's own native session picker.
-          local resume_spec = adapter.resume_cmd({
-            cwd = vim.fn.getcwd(),
-          })
-          -- Create new session record reusing existing id/uuid/title
-          local record = {
-            id           = sel.id,
-            session_uuid = sel.session_uuid,
-            adapter      = sel.adapter,
-            title        = sel.title,
-            status       = "active",
-            created_at   = sel.created_at,
-            bufnr        = nil,
-            winid        = nil,
-            job_id       = nil,
-            pending_image = nil,
-          }
+          local resume_spec = adapter.resume_cmd({ cwd = vim.fn.getcwd() })
+
+          -- Reuse the existing persistent identity (id, title, created_at)
+          local record = session._new_record(sel.adapter, sel.title)
+          record.id         = sel.id
+          record.created_at = sel.created_at
           session._add(record)
 
           vim.cmd("vsplit")
-          local win = vim.api.nvim_get_current_win()
-          local buf = vim.api.nvim_create_buf(false, false)
-          vim.api.nvim_win_set_buf(win, buf)
-
+          local win  = vim.api.nvim_get_current_win()
           local argv = vim.list_extend({ resume_spec.cmd }, resume_spec.args or {})
-          local job_id = vim.fn.termopen(argv, {
-            on_exit = function()
-              if record.pending_image then
-                require("neocode.images").delete_temp(record.pending_image)
-                record.pending_image = nil
-              end
-              record.status = "closed"
-              record.bufnr  = nil
-              record.winid  = nil
-              record.job_id = nil
-              session._persist(config)
-              session._remove(record.id)
-            end,
-          })
-
-          record.bufnr  = buf
-          record.winid  = win
-          record.job_id = job_id
-
-          session._register_buf_keymaps(buf, record, config)
-          session._persist(config)
-          vim.cmd("startinsert")
+          session._open_terminal(record, argv, win, config)
         end
       end)
 
@@ -160,7 +112,6 @@ function M.pick(config)
         vim.ui.input({ prompt = "Rename session: ", default = sel.title }, function(input)
           if not input or input == "" then return end
           session.rename_on_disk(sel.id, input, config)
-          -- If active, also update in-memory record
           local active = session._get(sel.id)
           if active then active.title = input end
           vim.schedule(function() M.pick(config) end)
@@ -170,8 +121,7 @@ function M.pick(config)
       -- n: new session
       map("n", "n", function()
         actions.close(prompt_bufnr)
-        local adapter_name = config.default_adapter
-        local adapter = config.adapters and config.adapters[adapter_name]
+        local adapter = config.adapters and config.adapters[config.default_adapter]
         if adapter then
           session.create(adapter, nil, config)
         end

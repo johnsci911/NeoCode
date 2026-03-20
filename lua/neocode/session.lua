@@ -9,10 +9,6 @@ local _counter = 0
 
 -- ── Internal helpers (prefixed _ for testing access) ──────────────────
 
-local function generate_uuid()
-  return vim.fn.system("uuidgen"):gsub("%s+", ""):lower()
-end
-
 function M._reset()
   _sessions  = {}
   _current_id = nil
@@ -24,7 +20,6 @@ function M._new_record(adapter_name, title)
   local id = "neocode_" .. tostring(os.time()) .. "_" .. _counter
   return {
     id           = id,
-    session_uuid = generate_uuid(),   -- passed to claude --session-id
     adapter      = adapter_name,
     title        = title or ("Session " .. id),
     status       = "active",          -- "active" | "closed"
@@ -63,55 +58,96 @@ function M._current()
   return _current_id and _sessions[_current_id]
 end
 
--- ── Public API ─────────────────────────────────────────────────────────
+-- ── Persistence ────────────────────────────────────────────────────────
 
--- Create and open a new session in a vertical split terminal buffer.
--- adapter: adapter module table
--- title: optional string; prompts user if nil
-function M.create(adapter, title, config)
-  if not title then
-    vim.ui.input({ prompt = "Session name: " }, function(input)
-      if not input or input == "" then
-        local n = #M._all() + 1
-        input = "Session " .. n
-      end
-      M._create_with_title(adapter, input, config)
-    end)
-  else
-    M._create_with_title(adapter, title, config)
+local function _sessions_path(config)
+  return config.data_dir .. "/sessions.json"
+end
+
+local function _write_sessions_json(path, list)
+  local ok, encoded = pcall(vim.fn.json_encode, list)
+  if ok then
+    local f = io.open(path, "w")
+    if f then
+      f:write(encoded)
+      f:close()
+    else
+      vim.notify("neocode: could not write " .. path, vim.log.levels.WARN)
+    end
   end
 end
 
-function M._create_with_title(adapter, title, config)
-  local record = M._new_record(adapter.name, title)
-  M._add(record)
-  _current_id = record.id
+function M._persist(config)
+  if not config or not config.data_dir then return end
+  local durable = {}
+  for _, s in pairs(_sessions) do
+    local cfg_adapter    = config.adapters and config.adapters[s.adapter]
+    local should_persist = not cfg_adapter or cfg_adapter.session_store ~= false
+    if should_persist then
+      table.insert(durable, {
+        id         = s.id,
+        adapter    = s.adapter,
+        title      = s.title,
+        status     = s.status or "active",
+        created_at = s.created_at,
+      })
+    end
+  end
+  _write_sessions_json(_sessions_path(config), durable)
+end
 
-  -- Open vertical split terminal
-  vim.cmd("vsplit")
-  local win = vim.api.nvim_get_current_win()
-  local spec = adapter.launch_cmd({
-    cwd          = vim.fn.getcwd(),
-    session_uuid = record.session_uuid,
-    name         = record.title,
-  })
+function M.load_all_from_disk(config)
+  if not config or not config.data_dir then return {} end
+  local f = io.open(_sessions_path(config))
+  if not f then return {} end
+  local ok, data = pcall(vim.fn.json_decode, f:read("*a"))
+  f:close()
+  if not ok or type(data) ~= "table" then return {} end
+  return data
+end
+
+function M.delete_from_disk(session_id, config)
+  local all = M.load_all_from_disk(config)
+  local filtered = {}
+  for _, s in ipairs(all) do
+    if s.id ~= session_id then
+      table.insert(filtered, s)
+    end
+  end
+  _write_sessions_json(_sessions_path(config), filtered)
+end
+
+function M.rename_on_disk(session_id, new_title, config)
+  local all = M.load_all_from_disk(config)
+  for _, s in ipairs(all) do
+    if s.id == session_id then
+      s.title = new_title
+      break
+    end
+  end
+  _write_sessions_json(_sessions_path(config), all)
+end
+
+-- ── Terminal lifecycle ─────────────────────────────────────────────────
+
+-- Spawn a terminal job in `win` for `record` using command `argv`.
+-- opts.prev_buf: if set, <Esc> in terminal mode cancels and returns to that buf.
+function M._open_terminal(record, argv, win, config, opts)
+  opts = opts or {}
   local buf = vim.api.nvim_create_buf(false, false)
   vim.api.nvim_win_set_buf(win, buf)
 
-  local argv = vim.list_extend({ spec.cmd }, spec.args or {})
   local job_id = vim.fn.termopen(argv, {
     on_exit = function()
       if record.pending_image then
         require("neocode.images").delete_temp(record.pending_image)
         record.pending_image = nil
       end
-      -- Mark closed but keep in store so history picker can resume it
       record.status = "closed"
       record.bufnr  = nil
       record.winid  = nil
       record.job_id = nil
       M._persist(config)
-      -- Remove from in-memory active table
       M._remove(record.id)
     end,
   })
@@ -120,16 +156,42 @@ function M._create_with_title(adapter, title, config)
   record.winid  = win
   record.job_id = job_id
 
-  -- Set a persistent keymap hint as the winbar of the chat window
   vim.wo[win].winbar = config.winbar or ""
-
-  -- Register buffer-local keymaps for this session
   M._register_buf_keymaps(buf, record, config)
 
-  -- Persist durable state
-  M._persist(config)
+  if opts.prev_buf then
+    vim.keymap.set("t", "<Esc>", function()
+      vim.fn.chansend(record.job_id, "\x03")
+      vim.schedule(function()
+        if vim.api.nvim_buf_is_valid(opts.prev_buf) then
+          vim.api.nvim_win_set_buf(win, opts.prev_buf)
+          vim.cmd("startinsert")
+        end
+      end)
+    end, { buffer = buf, silent = true })
+  end
 
+  M._persist(config)
   vim.cmd("startinsert")
+end
+
+-- ── Public API ─────────────────────────────────────────────────────────
+
+-- Create and open a new session in a vertical split terminal buffer.
+function M.create(adapter, title, config)
+  M._create_with_title(adapter, title, config)
+end
+
+function M._create_with_title(adapter, title, config)
+  local record = M._new_record(adapter.name, title)
+  M._add(record)
+  _current_id = record.id
+
+  vim.cmd("vsplit")
+  local win  = vim.api.nvim_get_current_win()
+  local spec = adapter.launch_cmd({ cwd = vim.fn.getcwd(), name = record.title })
+  local argv = vim.list_extend({ spec.cmd }, spec.args or {})
+  M._open_terminal(record, argv, win, config)
 end
 
 -- Cycle to next/prev session
@@ -152,7 +214,6 @@ function M.cycle(direction, config)
   local next_session = all[next_idx]
   _current_id = next_session.id
 
-  -- Switch to the session's buffer in current window
   if next_session.bufnr and vim.api.nvim_buf_is_valid(next_session.bufnr) then
     vim.api.nvim_set_current_buf(next_session.bufnr)
   end
@@ -177,6 +238,14 @@ function M.pick(config)
   local use_telescope = config and config.telescope_fallback ~= false
   local ok, telescope = pcall(require, "telescope.pickers")
 
+  local function switch_to(id)
+    local s = _sessions[id]
+    if s and s.bufnr and vim.api.nvim_buf_is_valid(s.bufnr) then
+      _current_id = id
+      vim.api.nvim_set_current_buf(s.bufnr)
+    end
+  end
+
   if ok and use_telescope then
     local finders     = require("telescope.finders")
     local conf        = require("telescope.config").values
@@ -191,12 +260,7 @@ function M.pick(config)
         actions.select_default:replace(function()
           actions.close(prompt_buf)
           local selection = action_state.get_selected_entry()
-          local id = id_map[selection[1]]
-          local s  = _sessions[id]
-          if s and s.bufnr and vim.api.nvim_buf_is_valid(s.bufnr) then
-            _current_id = id
-            vim.api.nvim_set_current_buf(s.bufnr)
-          end
+          switch_to(id_map[selection[1]])
         end)
         return true
       end,
@@ -204,88 +268,8 @@ function M.pick(config)
   else
     vim.ui.select(titles, { prompt = "NeoCode Sessions" }, function(choice)
       if not choice then return end
-      local id = id_map[choice]
-      local s  = _sessions[id]
-      if s and s.bufnr and vim.api.nvim_buf_is_valid(s.bufnr) then
-        _current_id = id
-        vim.api.nvim_set_current_buf(s.bufnr)
-      end
+      switch_to(id_map[choice])
     end)
-  end
-end
-
--- ── Persistence ────────────────────────────────────────────────────────
-
-function M._persist(config)
-  if not config or not config.data_dir then return end
-  local path = config.data_dir .. "/sessions.json"
-  local durable = {}
-  for _, s in pairs(_sessions) do
-    local cfg_adapter  = config.adapters and config.adapters[s.adapter]
-    local should_persist = not cfg_adapter or cfg_adapter.session_store ~= false
-    if should_persist then
-      table.insert(durable, {
-        id           = s.id,
-        session_uuid = s.session_uuid,
-        adapter      = s.adapter,
-        title        = s.title,
-        status       = s.status or "active",
-        created_at   = s.created_at,
-      })
-    end
-  end
-  local ok, encoded = pcall(vim.fn.json_encode, durable)
-  if ok then
-    local f = io.open(path, "w")
-    if f then
-      f:write(encoded)
-      f:close()
-    else
-      vim.notify("neocode: could not write sessions.json to " .. path, vim.log.levels.WARN)
-    end
-  end
-end
-
-function M.load_all_from_disk(config)
-  if not config or not config.data_dir then return {} end
-  local path = config.data_dir .. "/sessions.json"
-  local f = io.open(path)
-  if not f then return {} end
-  local ok, data = pcall(vim.fn.json_decode, f:read("*a"))
-  f:close()
-  if not ok or type(data) ~= "table" then return {} end
-  return data
-end
-
-function M.delete_from_disk(session_id, config)
-  local all = M.load_all_from_disk(config)
-  local filtered = {}
-  for _, s in ipairs(all) do
-    if s.id ~= session_id then
-      table.insert(filtered, s)
-    end
-  end
-  local path = config.data_dir .. "/sessions.json"
-  local ok, encoded = pcall(vim.fn.json_encode, filtered)
-  if ok then
-    local f = io.open(path, "w")
-    if f then f:write(encoded); f:close() end
-  end
-end
-
-function M.rename_on_disk(session_id, new_title, config)
-  local all = M.load_all_from_disk(config)
-  for _, s in ipairs(all) do
-    if s.id == session_id then
-      s.title = new_title
-      break
-    end
-  end
-  local path = config.data_dir .. "/sessions.json"
-  local ok, encoded = pcall(vim.fn.json_encode, all)
-  if ok then
-    local f = io.open(path, "w")
-    if f then f:write(encoded); f:close() end
   end
 end
 
@@ -303,11 +287,9 @@ function M._register_buf_keymaps(buf, record, config)
 
   -- Image paste (<leader>p avoids shadowing normal-mode p)
   vim.keymap.set("n", "<leader>p", function()
-    local neocode = require("neocode")
-    local adapter_name = record.adapter
-    local adapter = neocode._config.adapters[adapter_name]
+    local adapter = config.adapters and config.adapters[record.adapter]
     if adapter then
-      require("neocode.images").paste(adapter, record, neocode._config)
+      require("neocode.images").paste(adapter, record, config)
     end
   end, opts)
 
@@ -321,52 +303,23 @@ function M._register_buf_keymaps(buf, record, config)
 
   -- ? toggles hint overlay
   vim.keymap.set("n", "?", function()
-    require("neocode.hints").toggle(config)
+    require("neocode.hints").toggle()
   end, opts)
 
-  -- h opens Claude's native session picker (claude --resume)
+  -- h opens the adapter's native session picker (e.g. claude --resume)
   vim.keymap.set("n", "h", function()
     local adapter = config.adapters and config.adapters[record.adapter]
     if not adapter or not adapter.resume_cmd then
       vim.notify("neocode: adapter does not support resume", vim.log.levels.WARN)
       return
     end
-    local spec = adapter.resume_cmd({ cwd = vim.fn.getcwd() })
+    local spec       = adapter.resume_cmd({ cwd = vim.fn.getcwd() })
     local new_record = M._new_record(record.adapter, "Resume")
     M._add(new_record)
-    -- Replace current window instead of spawning a new split
-    local win = vim.api.nvim_get_current_win()
+    local win      = vim.api.nvim_get_current_win()
     local prev_buf = vim.api.nvim_get_current_buf()
-    local buf = vim.api.nvim_create_buf(false, false)
-    vim.api.nvim_win_set_buf(win, buf)
-    local argv = vim.list_extend({ spec.cmd }, spec.args or {})
-    local job_id = vim.fn.termopen(argv, {
-      on_exit = function()
-        new_record.status = "closed"
-        new_record.bufnr  = nil
-        new_record.winid  = nil
-        new_record.job_id = nil
-        M._persist(config)
-        M._remove(new_record.id)
-      end,
-    })
-    new_record.bufnr  = buf
-    new_record.winid  = win
-    new_record.job_id = job_id
-    vim.wo[win].winbar = config.winbar or ""
-    M._register_buf_keymaps(buf, new_record, config)
-    -- <Esc> in terminal mode cancels the picker and returns to previous session
-    vim.keymap.set("t", "<Esc>", function()
-      vim.fn.chansend(new_record.job_id, "\x03")
-      vim.schedule(function()
-        if vim.api.nvim_buf_is_valid(prev_buf) then
-          vim.api.nvim_win_set_buf(win, prev_buf)
-          vim.cmd("startinsert")
-        end
-      end)
-    end, { buffer = buf, silent = true })
-    M._persist(config)
-    vim.cmd("startinsert")
+    local argv     = vim.list_extend({ spec.cmd }, spec.args or {})
+    M._open_terminal(new_record, argv, win, config, { prev_buf = prev_buf })
   end, opts)
 
   -- i opens multi-line input window

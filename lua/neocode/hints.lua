@@ -30,18 +30,16 @@ function M._force_close()
   _buf = nil
 end
 
-function M.toggle(_config)
+function M.toggle()
   if M._is_open() then
     M._force_close()
     return
   end
 
-  -- Create buffer
   _buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(_buf, 0, -1, false, KEYMAP_LINES)
   vim.bo[_buf].modifiable = false
 
-  -- Calculate position: bottom of editor
   local width  = math.max(44, vim.o.columns - 4)
   local height = #KEYMAP_LINES
   local row    = vim.o.lines - height - 3
@@ -60,12 +58,10 @@ function M.toggle(_config)
 
   vim.wo[_win].winhl = "Normal:NormalFloat,FloatBorder:FloatBorder"
 
-  -- Close on keypress
   vim.keymap.set("n", "<Esc>", M._force_close, { buffer = _buf, silent = true })
   vim.keymap.set("n", "q",     M._force_close, { buffer = _buf, silent = true })
   vim.keymap.set("n", "?",     M._force_close, { buffer = _buf, silent = true })
 
-  -- Auto-close when focus leaves
   vim.api.nvim_create_autocmd("WinLeave", {
     buffer   = _buf,
     once     = true,

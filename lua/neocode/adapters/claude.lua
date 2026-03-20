@@ -16,16 +16,11 @@ function M.launch_cmd(opts)
   }
 end
 
--- Resume opens Claude's interactive session picker if no uuid,
--- or resumes a specific session if uuid is provided.
+-- Opens Claude's interactive session picker (claude --resume)
 function M.resume_cmd(opts)
-  local args = { "--resume" }
-  if opts and opts.session_uuid and opts.session_uuid ~= "" then
-    vim.list_extend(args, { opts.session_uuid })
-  end
   return {
     cmd  = "claude",
-    args = args,
+    args = { "--resume" },
     env  = nil,
     cwd  = opts and opts.cwd or vim.fn.getcwd(),
   }
@@ -39,7 +34,6 @@ end
 
 function M.attach_image(session, path)
   if session and session.job_id then
-    -- Claude CLI accepts image paths typed into the prompt
     vim.fn.chansend(session.job_id, path .. "\n")
   end
 end

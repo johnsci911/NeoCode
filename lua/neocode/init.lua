@@ -1,5 +1,4 @@
 local M = {}
-local session = require("neocode.session")
 
 local REQUIRED_ADAPTER_FIELDS = { "name", "launch_cmd", "interrupt", "attach_image", "session_store" }
 
@@ -24,11 +23,7 @@ local function validate_adapter(name, adapter)
 end
 
 function M._register_global_keymaps()
-  local prefix       = M._config.keymap_prefix
-  local adapter_name = M._config.default_adapter
-  local adapter      = M._config.adapters[adapter_name]
-
-  -- <leader>aiC — startup launcher
+  local prefix = M._config.keymap_prefix
   vim.keymap.set("n", prefix .. "C", function()
     require("neocode.launcher").open(M._config)
   end, { desc = "NeoCode: launcher" })
@@ -37,19 +32,17 @@ end
 function M.setup(opts)
   M._config = vim.tbl_deep_extend("force", DEFAULT_CONFIG, opts or {})
 
-  -- Validate all adapters
   for name, adapter in pairs(M._config.adapters) do
     validate_adapter(name, adapter)
   end
 
-  -- Ensure data_dir exists
   vim.fn.mkdir(M._config.data_dir, "p")
-  vim.fn.mkdir(M._config.data_dir .. "/images", "p")
+  local images_dir = M._config.data_dir .. "/images"
+  vim.fn.mkdir(images_dir, "p")
 
   -- Clean up stale image folders from crashed sessions
-  local sessions_path = M._config.data_dir .. "/sessions.json"
   local live_ids = {}
-  local f = io.open(sessions_path)
+  local f = io.open(M._config.data_dir .. "/sessions.json")
   if f then
     local ok, data = pcall(vim.fn.json_decode, f:read("*a"))
     f:close()
@@ -59,7 +52,7 @@ function M.setup(opts)
       end
     end
   end
-  require("neocode.images").cleanup_stale(M._config.data_dir, live_ids)
+  require("neocode.images").cleanup_stale(images_dir, live_ids)
 
   M._register_global_keymaps()
   M._initialized = true
