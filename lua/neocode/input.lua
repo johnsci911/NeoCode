@@ -48,9 +48,17 @@ function M.open(session, config)
       return
     end
     vim.api.nvim_win_close(win, true)
-    -- Send after closing — schedule so the terminal buffer has time to regain focus
     vim.schedule(function()
-      vim.fn.chansend(session.job_id, text .. "\n")
+      -- Switch to the terminal buffer and enter terminal mode
+      if session.bufnr and vim.api.nvim_buf_is_valid(session.bufnr) then
+        vim.api.nvim_set_current_buf(session.bufnr)
+      end
+      vim.cmd("startinsert")
+      vim.cmd("redraw!")
+      -- Feed text as keypresses into the terminal (appears in CLI input field)
+      -- Newlines become Shift+Enter (Claude CLI line continuation) except the last
+      local escaped = vim.api.nvim_replace_termcodes(text, true, false, true)
+      vim.api.nvim_feedkeys(escaped, "t", false)
     end)
   end
 
