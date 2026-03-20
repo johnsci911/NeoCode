@@ -41,3 +41,71 @@ describe("session", function()
     assert.not_equals(a.id, b.id)
   end)
 end)
+
+describe("session persistence", function()
+  local tmp_dir = "/tmp/neocode_test_persist_" .. tostring(os.time())
+  local config  = {
+    data_dir = tmp_dir,
+    adapters = {
+      claude = {
+        name          = "claude",
+        session_store = true,
+        launch_cmd    = function() return { cmd = "true", args = {}, cwd = "/tmp" } end,
+        interrupt     = function() end,
+        attach_image  = function() end,
+      },
+    },
+  }
+
+  before_each(function()
+    session._reset()
+    vim.fn.mkdir(tmp_dir, "p")
+  end)
+
+  after_each(function()
+    vim.fn.delete(tmp_dir, "rf")
+  end)
+
+  it("_persist() writes sessions.json", function()
+    local s = session._new_record("claude", "Persist me")
+    session._add(s)
+    session._persist(config)
+    local path = tmp_dir .. "/sessions.json"
+    assert.equals(1, vim.fn.filereadable(path))
+  end)
+
+  it("_persist() does not write runtime fields", function()
+    local s    = session._new_record("claude", "No runtime")
+    s.bufnr    = 99
+    s.job_id   = 5
+    session._add(s)
+    session._persist(config)
+    local f       = io.open(tmp_dir .. "/sessions.json")
+    local content = f:read("*a")
+    f:close()
+    assert.is_falsy(content:find("bufnr"))
+    assert.is_falsy(content:find("job_id"))
+  end)
+
+  it("_persist() skips sessions with session_store = false", function()
+    local opencode_adapter = {
+      name          = "opencode",
+      session_store = false,
+      launch_cmd    = function() return { cmd = "true", args = {}, cwd = "/tmp" } end,
+      interrupt     = function() end,
+      attach_image  = function() end,
+    }
+    local cfg = {
+      data_dir = tmp_dir,
+      adapters = { opencode = opencode_adapter },
+    }
+    local s = session._new_record("opencode", "OpenCode chat")
+    session._add(s)
+    session._persist(cfg)
+    local f       = io.open(tmp_dir .. "/sessions.json")
+    local content = f:read("*a")
+    f:close()
+    -- Should be an empty array since session_store = false
+    assert.equals("[]", content)
+  end)
+end)
