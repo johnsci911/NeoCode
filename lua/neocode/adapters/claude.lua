@@ -5,9 +5,6 @@ M.session_store = true
 
 function M.launch_cmd(opts)
   local args = {}
-  if opts and opts.session_uuid then
-    vim.list_extend(args, { "--session-id", opts.session_uuid })
-  end
   if opts and opts.name then
     vim.list_extend(args, { "--name", opts.name })
   end
@@ -19,10 +16,16 @@ function M.launch_cmd(opts)
   }
 end
 
+-- Resume opens Claude's interactive session picker if no uuid,
+-- or resumes a specific session if uuid is provided.
 function M.resume_cmd(opts)
+  local args = { "--resume" }
+  if opts and opts.session_uuid and opts.session_uuid ~= "" then
+    vim.list_extend(args, { opts.session_uuid })
+  end
   return {
     cmd  = "claude",
-    args = { "--resume", opts.session_uuid },
+    args = args,
     env  = nil,
     cwd  = opts and opts.cwd or vim.fn.getcwd(),
   }
