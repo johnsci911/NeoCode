@@ -48,11 +48,10 @@ function M.open(session, config)
       return
     end
     vim.api.nvim_win_close(win, true)
-    -- Focus back to the terminal buffer before sending
-    if session.bufnr and vim.api.nvim_buf_is_valid(session.bufnr) then
-      vim.api.nvim_set_current_buf(session.bufnr)
-    end
-    vim.fn.chansend(session.job_id, text .. "\n")
+    -- Send after closing — schedule so the terminal buffer has time to regain focus
+    vim.schedule(function()
+      vim.fn.chansend(session.job_id, text .. "\n")
+    end)
   end
 
   local function cancel()
