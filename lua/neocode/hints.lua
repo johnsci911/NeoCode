@@ -6,15 +6,16 @@ local _buf = nil
 local KEYMAP_LINES = {
   "  NeoCode",
   " ──────────────────────────────────────",
-  "  <leader>aiC   New session",
-  "  <leader>aih   Session history",
-  "  <S-p>         Session picker",
+  "  <leader>aiC   New session / launcher",
+  "  h             Session history",
+  "  i             Multi-line input",
   "  <leader>p     Paste image",
   "  <C-c>         Interrupt AI",
   "  { / }         Cycle sessions",
-  "  <leader>ai    Toggle this overlay",
+  "  <S-p>         Quick session picker",
+  "  ?             Toggle this overlay",
   " ──────────────────────────────────────",
-  "  Press any key to dismiss",
+  "  Press ? or q to dismiss",
 }
 
 function M._is_open()
@@ -62,6 +63,7 @@ function M.toggle(_config)
   -- Close on keypress
   vim.keymap.set("n", "<Esc>", M._force_close, { buffer = _buf, silent = true })
   vim.keymap.set("n", "q",     M._force_close, { buffer = _buf, silent = true })
+  vim.keymap.set("n", "?",     M._force_close, { buffer = _buf, silent = true })
 
   -- Auto-close when focus leaves
   vim.api.nvim_create_autocmd("WinLeave", {

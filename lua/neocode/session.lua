@@ -315,6 +315,22 @@ function M._register_buf_keymaps(buf, record, config)
   end
   vim.keymap.set("n", "<C-c>", send_interrupt, opts)
   vim.keymap.set("t", "<C-c>", send_interrupt, opts)
+
+  -- ? toggles hint overlay
+  vim.keymap.set("n", "?", function()
+    require("neocode.hints").toggle(config)
+  end, opts)
+
+  -- h opens history picker
+  vim.keymap.set("n", "h", function()
+    require("neocode.history").pick(config)
+  end, opts)
+
+  -- i opens multi-line input window
+  vim.keymap.set("n", "i", function()
+    local s = M._current()
+    require("neocode.input").open(s, config)
+  end, opts)
 end
 
 return M
