@@ -87,9 +87,10 @@ function M.pick(config)
             vim.notify("neocode: adapter '" .. sel.adapter .. "' does not support resume", vim.log.levels.ERROR)
             return
           end
+          -- Don't pass session_uuid — neocode's uuid was never given to Claude.
+          -- claude --resume (no args) opens Claude's own native session picker.
           local resume_spec = adapter.resume_cmd({
-            session_uuid = sel.session_uuid,
-            cwd          = vim.fn.getcwd(),
+            cwd = vim.fn.getcwd(),
           })
           -- Create new session record reusing existing id/uuid/title
           local record = {
