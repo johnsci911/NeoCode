@@ -237,6 +237,16 @@ function M._register_buf_keymaps(buf, record, config)
   -- Session picker
   vim.keymap.set("n", "<S-p>", function() M.pick(config) end, opts)
 
+  -- Image paste (<leader>p avoids shadowing normal-mode p)
+  vim.keymap.set("n", "<leader>p", function()
+    local neocode = require("neocode")
+    local adapter_name = record.adapter
+    local adapter = neocode._config.adapters[adapter_name]
+    if adapter then
+      require("neocode.images").paste(adapter, record, neocode._config)
+    end
+  end, opts)
+
   -- Interrupt AI — both normal and terminal mode
   local function send_interrupt()
     local s = M._current()
