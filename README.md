@@ -1,12 +1,10 @@
 # neocode.nvim
 
-A Neovim plugin that wraps AI CLIs — starting with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — with native Neovim UX. Multi-session management, image paste, multi-line input, session history, and a hint overlay. No API keys. No re-implementation of the AI layer. The CLI does its thing; NeoCode makes it feel at home in Neovim.
+A Neovim plugin that wraps AI CLIs — starting with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — with native Neovim UX. Image paste, multi-line input, and a hint overlay. No API keys. No re-implementation of the AI layer. The CLI does its thing; NeoCode makes it feel at home in Neovim.
 
 ## Features
 
-- **Native terminal sessions** — the CLI renders in a vertical split terminal buffer. All CLI features work as-is: slash commands (`/btw`, `/compact`, `/fork`, etc.), keyboard shortcuts, and session history
-- **Multi-session** — open multiple chats side by side, cycle through them with `{`/`}`, or jump with the Telescope session picker
-- **Session history** — persists sessions across restarts; resume, rename, or delete from a Telescope picker
+- **Native terminal sessions** — the CLI renders in a vertical split terminal buffer. All CLI features work as-is: slash commands (`/btw`, `/compact`, `/fork`, etc.), keyboard shortcuts, and history — handled entirely by the CLI
 - **Multi-line input** — compose long prompts in a floating editor window (`i`), send with `<C-s>`
 - **Image paste** — grab an image from clipboard with `<leader>p`; temp file is created, sent to the CLI, and cleaned up automatically
 - **Hint overlay** — press `?` for a which-key style cheatsheet anchored to the bottom of the screen
@@ -50,11 +48,11 @@ A Neovim plugin that wraps AI CLIs — starting with [Claude Code](https://docs.
 | Keymap | Action |
 |--------|--------|
 | `i` | Open multi-line input window |
-| `h` | Resume a past session (opens the CLI's native session picker) |
+| `h` | Open the CLI's native session picker |
 | `<leader>p` | Paste image from clipboard |
 | `<C-c>` | Interrupt the AI (normal and terminal mode) |
-| `{` / `}` | Cycle to previous / next session |
-| `<S-p>` | Session picker (active sessions) |
+| `{` / `}` | Cycle between open windows |
+| `<S-p>` | Window picker |
 | `?` | Toggle hint overlay |
 
 > **Tip:** Most keymaps work in normal mode. Press `<C-\><C-n>` to leave terminal mode.
@@ -67,12 +65,12 @@ A Neovim plugin that wraps AI CLIs — starting with [Claude Code](https://docs.
 | `<M-CR>` | Send and close (Alt+Enter fallback) |
 | `<Esc>` | Cancel without sending |
 
-### Resume picker (`h`)
+### CLI session picker (`h`)
 
 | Keymap | Action |
 |--------|--------|
-| `<CR>` | Resume selected session |
-| `<Esc>` | Cancel and return to current session |
+| `<CR>` | Open selected session |
+| `<Esc>` | Cancel and return to current window |
 
 ## Configuration
 
@@ -91,9 +89,9 @@ require("neocode").setup({
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `default_adapter` | `"claude"` | Adapter used when creating a session from history |
+| `default_adapter` | `"claude"` | Adapter used by default |
 | `keymap_prefix` | `"<leader>ai"` | Prefix for global keymaps |
-| `data_dir` | `stdpath("data")/neocode` | Where sessions and temp images are stored |
+| `data_dir` | `stdpath("data")/neocode` | Where temp images are stored |
 | `telescope_fallback` | `true` | Use `vim.ui.select` if Telescope is not available |
 | `winbar` | *(hint string)* | Persistent keymap hint shown at the top of each chat window |
 | `adapters` | `{}` | Table of adapter name → adapter module |
@@ -145,8 +143,6 @@ require("neocode").setup({
 
 ## How it works
 
-NeoCode spawns each AI CLI as a Neovim terminal job (`vim.fn.termopen`) in a vertical split. The CLI owns its own rendering — NeoCode only manages the window lifecycle, session metadata, and convenience keymaps. This means every native CLI feature (streaming output, slash commands, keyboard shortcuts) works without any special handling.
+NeoCode spawns each AI CLI as a Neovim terminal job (`vim.fn.termopen`) in a vertical split. The CLI owns its own rendering and session history — NeoCode only manages the window lifecycle and convenience keymaps. Every native CLI feature (streaming output, slash commands, keyboard shortcuts, session history) works without any special handling.
 
-Session metadata (title, adapter, status) is persisted to `data_dir/sessions.json` so the history picker survives restarts. Runtime state (buffer, window, job ID) is kept in memory and discarded on exit.
-
-Images are saved to a temp file under `data_dir/images/<session-id>/`, sent to the CLI, and deleted when the session closes or on the next startup if the session crashed.
+Images are saved to a temp file under `data_dir/images/`, sent to the CLI, and deleted when the session closes or on the next startup if the session crashed.
