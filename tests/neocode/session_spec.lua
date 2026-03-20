@@ -1,0 +1,43 @@
+local session = require("neocode.session")
+
+describe("session", function()
+  before_each(function()
+    session._reset()  -- clear in-memory state between tests
+  end)
+
+  it("creates a record with correct fields", function()
+    local s = session._new_record("claude", "Test session")
+    assert.is_not_nil(s.id)
+    assert.equals("claude", s.adapter)
+    assert.equals("Test session", s.title)
+    assert.is_number(s.created_at)
+    -- runtime fields start nil (set when buffer is opened)
+    assert.is_nil(s.bufnr)
+    assert.is_nil(s.job_id)
+  end)
+
+  it("_add() makes session retrievable by id", function()
+    local s = session._new_record("claude", "My chat")
+    session._add(s)
+    assert.equals(s, session._get(s.id))
+  end)
+
+  it("_remove() deletes session from table", function()
+    local s = session._new_record("claude", "Temp")
+    session._add(s)
+    session._remove(s.id)
+    assert.is_nil(session._get(s.id))
+  end)
+
+  it("_all() returns all sessions", function()
+    session._add(session._new_record("claude", "A"))
+    session._add(session._new_record("claude", "B"))
+    assert.equals(2, #session._all())
+  end)
+
+  it("generates unique ids", function()
+    local a = session._new_record("claude", "A")
+    local b = session._new_record("claude", "B")
+    assert.not_equals(a.id, b.id)
+  end)
+end)
