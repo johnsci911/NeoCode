@@ -87,6 +87,17 @@ describe("session persistence", function()
     assert.is_falsy(content:find("job_id"))
   end)
 
+  it("_persist() includes session_uuid and status", function()
+    local s = session._new_record("claude", "UUID test")
+    session._add(s)
+    session._persist(config)
+    local f       = io.open(tmp_dir .. "/sessions.json")
+    local content = f:read("*a")
+    f:close()
+    assert.is_truthy(content:find("session_uuid"))
+    assert.is_truthy(content:find("status"))
+  end)
+
   it("_persist() skips sessions with session_store = false", function()
     local opencode_adapter = {
       name          = "opencode",
@@ -107,5 +118,42 @@ describe("session persistence", function()
     f:close()
     -- Should be an empty array since session_store = false
     assert.equals("[]", content)
+  end)
+end)
+
+describe("session disk operations", function()
+  local tmp_dir = "/tmp/neocode_test_disk_" .. tostring(os.time())
+  local config  = { data_dir = tmp_dir, adapters = {} }
+
+  before_each(function()
+    session._reset()
+    vim.fn.mkdir(tmp_dir, "p")
+  end)
+
+  after_each(function()
+    vim.fn.delete(tmp_dir, "rf")
+  end)
+
+  it("load_all_from_disk() returns empty table when no file", function()
+    local all = session.load_all_from_disk(config)
+    assert.equals(0, #all)
+  end)
+
+  it("delete_from_disk() removes session by id", function()
+    local s = session._new_record("claude", "Delete me")
+    session._add(s)
+    session._persist(config)
+    session.delete_from_disk(s.id, config)
+    local all = session.load_all_from_disk(config)
+    assert.equals(0, #all)
+  end)
+
+  it("rename_on_disk() updates session title", function()
+    local s = session._new_record("claude", "Old name")
+    session._add(s)
+    session._persist(config)
+    session.rename_on_disk(s.id, "New name", config)
+    local all = session.load_all_from_disk(config)
+    assert.equals("New name", all[1].title)
   end)
 end)

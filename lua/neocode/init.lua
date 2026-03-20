@@ -36,6 +36,11 @@ function M._register_global_keymaps()
     session.create(adapter, nil, M._config)
   end, { desc = "NeoCode: new session" })
 
+  -- <leader>aih — session history picker
+  vim.keymap.set("n", prefix .. "h", function()
+    require("neocode.history").pick(M._config)
+  end, { desc = "NeoCode: session history" })
+
   -- <leader>ai — toggle hint overlay
   vim.keymap.set("n", prefix, function()
     require("neocode.hints").toggle(M._config)

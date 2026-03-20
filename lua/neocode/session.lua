@@ -9,6 +9,10 @@ local _counter = 0
 
 -- ── Internal helpers (prefixed _ for testing access) ──────────────────
 
+local function generate_uuid()
+  return vim.fn.system("uuidgen"):gsub("%s+", ""):lower()
+end
+
 function M._reset()
   _sessions  = {}
   _current_id = nil
@@ -19,10 +23,12 @@ function M._new_record(adapter_name, title)
   _counter = _counter + 1
   local id = "neocode_" .. tostring(os.time()) .. "_" .. _counter
   return {
-    id         = id,
-    adapter    = adapter_name,
-    title      = title or ("Session " .. id),
-    created_at = os.time(),
+    id           = id,
+    session_uuid = generate_uuid(),   -- passed to claude --session-id
+    adapter      = adapter_name,
+    title        = title or ("Session " .. id),
+    status       = "active",          -- "active" | "closed"
+    created_at   = os.time(),
     -- runtime fields (not persisted):
     bufnr         = nil,
     winid         = nil,
@@ -84,7 +90,11 @@ function M._create_with_title(adapter, title, config)
   -- Open vertical split terminal
   vim.cmd("vsplit")
   local win = vim.api.nvim_get_current_win()
-  local spec = adapter.launch_cmd({ cwd = vim.fn.getcwd() })
+  local spec = adapter.launch_cmd({
+    cwd          = vim.fn.getcwd(),
+    session_uuid = record.session_uuid,
+    name         = record.title,
+  })
   local buf = vim.api.nvim_create_buf(false, false)
   vim.api.nvim_win_set_buf(win, buf)
 
@@ -95,8 +105,14 @@ function M._create_with_title(adapter, title, config)
         require("neocode.images").delete_temp(record.pending_image)
         record.pending_image = nil
       end
-      M._remove(record.id)
+      -- Mark closed but keep in store so history picker can resume it
+      record.status = "closed"
+      record.bufnr  = nil
+      record.winid  = nil
+      record.job_id = nil
       M._persist(config)
+      -- Remove from in-memory active table
+      M._remove(record.id)
     end,
   })
 
@@ -206,10 +222,12 @@ function M._persist(config)
     local should_persist = not cfg_adapter or cfg_adapter.session_store ~= false
     if should_persist then
       table.insert(durable, {
-        id         = s.id,
-        adapter    = s.adapter,
-        title      = s.title,
-        created_at = s.created_at,
+        id           = s.id,
+        session_uuid = s.session_uuid,
+        adapter      = s.adapter,
+        title        = s.title,
+        status       = s.status or "active",
+        created_at   = s.created_at,
       })
     end
   end
@@ -222,6 +240,49 @@ function M._persist(config)
     else
       vim.notify("neocode: could not write sessions.json to " .. path, vim.log.levels.WARN)
     end
+  end
+end
+
+function M.load_all_from_disk(config)
+  if not config or not config.data_dir then return {} end
+  local path = config.data_dir .. "/sessions.json"
+  local f = io.open(path)
+  if not f then return {} end
+  local ok, data = pcall(vim.fn.json_decode, f:read("*a"))
+  f:close()
+  if not ok or type(data) ~= "table" then return {} end
+  return data
+end
+
+function M.delete_from_disk(session_id, config)
+  local all = M.load_all_from_disk(config)
+  local filtered = {}
+  for _, s in ipairs(all) do
+    if s.id ~= session_id then
+      table.insert(filtered, s)
+    end
+  end
+  local path = config.data_dir .. "/sessions.json"
+  local ok, encoded = pcall(vim.fn.json_encode, filtered)
+  if ok then
+    local f = io.open(path, "w")
+    if f then f:write(encoded); f:close() end
+  end
+end
+
+function M.rename_on_disk(session_id, new_title, config)
+  local all = M.load_all_from_disk(config)
+  for _, s in ipairs(all) do
+    if s.id == session_id then
+      s.title = new_title
+      break
+    end
+  end
+  local path = config.data_dir .. "/sessions.json"
+  local ok, encoded = pcall(vim.fn.json_encode, all)
+  if ok then
+    local f = io.open(path, "w")
+    if f then f:write(encoded); f:close() end
   end
 end
 
