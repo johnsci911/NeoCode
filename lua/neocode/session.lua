@@ -321,9 +321,37 @@ function M._register_buf_keymaps(buf, record, config)
     require("neocode.hints").toggle(config)
   end, opts)
 
-  -- h opens history picker
+  -- h opens Claude's native session picker (claude --resume)
   vim.keymap.set("n", "h", function()
-    require("neocode.history").pick(config)
+    local adapter = config.adapters and config.adapters[record.adapter]
+    if not adapter or not adapter.resume_cmd then
+      vim.notify("neocode: adapter does not support resume", vim.log.levels.WARN)
+      return
+    end
+    local spec = adapter.resume_cmd({ cwd = vim.fn.getcwd() })
+    local new_record = M._new_record(record.adapter, "Resume")
+    M._add(new_record)
+    vim.cmd("vsplit")
+    local win = vim.api.nvim_get_current_win()
+    local buf = vim.api.nvim_create_buf(false, false)
+    vim.api.nvim_win_set_buf(win, buf)
+    local argv = vim.list_extend({ spec.cmd }, spec.args or {})
+    local job_id = vim.fn.termopen(argv, {
+      on_exit = function()
+        new_record.status = "closed"
+        new_record.bufnr  = nil
+        new_record.winid  = nil
+        new_record.job_id = nil
+        M._persist(config)
+        M._remove(new_record.id)
+      end,
+    })
+    new_record.bufnr  = buf
+    new_record.winid  = win
+    new_record.job_id = job_id
+    M._register_buf_keymaps(buf, new_record, config)
+    M._persist(config)
+    vim.cmd("startinsert")
   end, opts)
 
   -- i opens multi-line input window
