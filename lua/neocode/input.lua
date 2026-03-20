@@ -26,7 +26,7 @@ function M.open(session, config)
     height   = height,
     style    = "minimal",
     border   = "rounded",
-    title    = " NeoCode Input — <C-s> send · <Esc> cancel ",
+    title    = " NeoCode Input — <C-s>/<M-CR> send · <Esc> cancel ",
     title_pos = "center",
   })
 
@@ -39,19 +39,32 @@ function M.open(session, config)
   local function send_and_close()
     local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
     local text  = table.concat(lines, "\n")
-    vim.api.nvim_win_close(win, true)
-    if text ~= "" and session.job_id then
-      vim.fn.chansend(session.job_id, text .. "\n")
+    if text == "" then
+      vim.api.nvim_win_close(win, true)
+      return
     end
+    if not session.job_id then
+      vim.notify("neocode: session has no active job (job_id is nil)", vim.log.levels.ERROR)
+      return
+    end
+    vim.api.nvim_win_close(win, true)
+    -- Focus back to the terminal buffer before sending
+    if session.bufnr and vim.api.nvim_buf_is_valid(session.bufnr) then
+      vim.api.nvim_set_current_buf(session.bufnr)
+    end
+    vim.fn.chansend(session.job_id, text .. "\n")
   end
 
   local function cancel()
     vim.api.nvim_win_close(win, true)
   end
 
-  -- Send: <C-s> in both insert and normal mode
-  vim.keymap.set("i", "<C-s>", send_and_close, { buffer = buf, silent = true })
-  vim.keymap.set("n", "<C-s>", send_and_close, { buffer = buf, silent = true })
+  -- Send: <C-s> in both modes (may be blocked by terminal — use <M-CR> as fallback)
+  vim.keymap.set("i", "<C-s>",  send_and_close, { buffer = buf, silent = true })
+  vim.keymap.set("n", "<C-s>",  send_and_close, { buffer = buf, silent = true })
+  -- Alt+Enter as reliable fallback send (not intercepted by terminal)
+  vim.keymap.set("i", "<M-CR>", send_and_close, { buffer = buf, silent = true })
+  vim.keymap.set("n", "<M-CR>", send_and_close, { buffer = buf, silent = true })
 
   -- Cancel: <Esc> in normal mode
   vim.keymap.set("n", "<Esc>", cancel, { buffer = buf, silent = true })
