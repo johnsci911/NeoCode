@@ -48,4 +48,16 @@ describe("neocode.setup", function()
     assert.is_table(spec.args)
     assert.equals("/tmp", spec.cwd)
   end)
+
+  it("registers global keymaps after setup", function()
+    local claude = require("neocode.adapters.claude")
+    neocode.setup({ adapters = { claude = claude } })
+    -- Check keymap exists (Neovim API)
+    local maps = vim.api.nvim_get_keymap("n")
+    local found = false
+    for _, m in ipairs(maps) do
+      if m.lhs == "\\aiC" or m.lhs == "<leader>aiC" then found = true end
+    end
+    assert.is_true(found)
+  end)
 end)

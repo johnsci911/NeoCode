@@ -1,4 +1,5 @@
 local M = {}
+local session = require("neocode.session")
 
 local REQUIRED_ADAPTER_FIELDS = { "name", "launch_cmd", "interrupt", "attach_image", "session_store" }
 
@@ -19,6 +20,26 @@ local function validate_adapter(name, adapter)
       error(string.format("neocode: adapter '%s' is missing required field '%s'", name, field))
     end
   end
+end
+
+function M._register_global_keymaps()
+  local prefix       = M._config.keymap_prefix
+  local adapter_name = M._config.default_adapter
+  local adapter      = M._config.adapters[adapter_name]
+
+  -- <leader>aiC — new session
+  vim.keymap.set("n", prefix .. "C", function()
+    if not adapter then
+      vim.notify("neocode: adapter '" .. adapter_name .. "' not configured", vim.log.levels.ERROR)
+      return
+    end
+    session.create(adapter, nil, M._config)
+  end, { desc = "NeoCode: new session" })
+
+  -- <leader>ai — toggle hint overlay
+  vim.keymap.set("n", prefix, function()
+    require("neocode.hints").toggle(M._config)
+  end, { desc = "NeoCode: toggle hints" })
 end
 
 function M.setup(opts)
@@ -48,6 +69,7 @@ function M.setup(opts)
   end
   require("neocode.images").cleanup_stale(M._config.data_dir, live_ids)
 
+  M._register_global_keymaps()
   M._initialized = true
 end
 
