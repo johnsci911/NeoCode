@@ -336,6 +336,7 @@ function M._register_buf_keymaps(buf, record, config)
     M._add(new_record)
     -- Replace current window instead of spawning a new split
     local win = vim.api.nvim_get_current_win()
+    local prev_buf = vim.api.nvim_get_current_buf()
     local buf = vim.api.nvim_create_buf(false, false)
     vim.api.nvim_win_set_buf(win, buf)
     local argv = vim.list_extend({ spec.cmd }, spec.args or {})
@@ -354,6 +355,16 @@ function M._register_buf_keymaps(buf, record, config)
     new_record.job_id = job_id
     vim.wo[win].winbar = config.winbar or ""
     M._register_buf_keymaps(buf, new_record, config)
+    -- <Esc> in terminal mode cancels the picker and returns to previous session
+    vim.keymap.set("t", "<Esc>", function()
+      vim.fn.chansend(new_record.job_id, "\x03")
+      vim.schedule(function()
+        if vim.api.nvim_buf_is_valid(prev_buf) then
+          vim.api.nvim_win_set_buf(win, prev_buf)
+          vim.cmd("startinsert")
+        end
+      end)
+    end, { buffer = buf, silent = true })
     M._persist(config)
     vim.cmd("startinsert")
   end, opts)
