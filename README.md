@@ -1,28 +1,19 @@
-# neocode.nvim
+# NeoCode
 
-A Neovim plugin that wraps AI CLIs — starting with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — with native Neovim UX. Image paste, multi-line input, and a hint overlay. No API keys. No re-implementation of the AI layer. The CLI does its thing; NeoCode makes it feel at home in Neovim.
+A simple Neovim plugin that wraps AI CLIs with additional features:
 
-## Features
+- **Visible multi-line input** — compose prompts in a floating editor, not a single terminal line
+- **Paste images from clipboard** — send screenshots and diagrams straight to the AI
+- **Native session keymaps** — open, resume, and manage CLI sessions without leaving Neovim
 
-- **Native terminal sessions** — the CLI renders in a vertical split terminal buffer. All CLI features work as-is: slash commands (`/btw`, `/compact`, `/fork`, etc.), keyboard shortcuts, and history — handled entirely by the CLI
-- **Multi-line input** — compose long prompts in a floating editor window (`i`), send with `<C-s>`
-- **Image paste** — grab an image from clipboard with `<leader>p`; temp file is created, sent to the CLI, and cleaned up automatically
-- **Hint overlay** — press `?` for a which-key style cheatsheet anchored to the bottom of the screen
-- **Adapter pattern** — swap or add CLI backends by dropping a file in `adapters/`
-
-## Requirements
-
-- Neovim ≥ 0.9
-- [plenary.nvim](https://github.com/nvim-lua/plenary.nvim)
-- [telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) *(optional — falls back to `vim.ui.select`)*
-- `pngpaste` (macOS) or `wl-paste` / `xclip` (Linux) for image paste
+No fancy UI, just plain simple native AI CLI experience inside Neovim.
 
 ## Install
 
 ```lua
 -- lazy.nvim
 {
-  "yourname/neocode.nvim",
+  "johnsci911/NeoCode",
   dependencies = { "nvim-lua/plenary.nvim", "nvim-telescope/telescope.nvim" },
   config = function()
     require("neocode").setup({
@@ -34,6 +25,13 @@ A Neovim plugin that wraps AI CLIs — starting with [Claude Code](https://docs.
   end,
 }
 ```
+
+### Requirements
+
+- Neovim >= 0.9
+- [plenary.nvim](https://github.com/nvim-lua/plenary.nvim)
+- [telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) *(optional — falls back to `vim.ui.select`)*
+- `pngpaste` (macOS) or `wl-paste` / `xclip` (Linux) for image paste
 
 ## Keymaps
 
@@ -50,27 +48,27 @@ A Neovim plugin that wraps AI CLIs — starting with [Claude Code](https://docs.
 | `i` | Open multi-line input window |
 | `h` | Open the CLI's native session picker |
 | `<leader>p` | Paste image from clipboard |
-| `<C-c>` | Interrupt the AI (normal and terminal mode) |
+| `<C-c>` | Interrupt the AI |
 | `{` / `}` | Cycle between open windows |
 | `<S-p>` | Window picker |
 | `?` | Toggle hint overlay |
 
-> **Tip:** Most keymaps work in normal mode. Press `<C-\><C-n>` to leave terminal mode.
+> **Tip:** Press `<C-\><C-n>` to leave terminal mode first.
 
 ### Multi-line input window
 
 | Keymap | Action |
 |--------|--------|
 | `<C-s>` | Send and close |
-| `<M-CR>` | Send and close (Alt+Enter fallback) |
+| `<M-CR>` | Send and close (Alt+Enter) |
 | `<Esc>` | Cancel without sending |
 
-### CLI session picker (`h`)
+### Session picker (`h`)
 
 | Keymap | Action |
 |--------|--------|
 | `<CR>` | Open selected session |
-| `<Esc>` | Cancel and return to current window |
+| `<Esc>` | Cancel |
 
 ## Configuration
 
@@ -104,28 +102,25 @@ Drop a file in `lua/neocode/adapters/` implementing this interface:
 local M = {}
 
 M.name          = "myai"
-M.session_store = true  -- set false to skip persisting this adapter's sessions to disk
+M.session_store = true  -- set false to skip persisting sessions to disk
 
--- (Required) Return the command spec to launch a new session
+-- (Required) Launch a new session
 function M.launch_cmd(opts)
-  -- opts: { cwd, name }
   return { cmd = "myai", args = { "--name", opts.name }, cwd = opts.cwd }
 end
 
--- (Required) Send Ctrl-C to interrupt a running response
+-- (Required) Interrupt a running response
 function M.interrupt(session)
   vim.fn.chansend(session.job_id, "\x03")
 end
 
--- (Required) Send an image path to the CLI input
+-- (Required) Send an image path to the CLI
 function M.attach_image(session, path)
   vim.fn.chansend(session.job_id, path .. "\n")
 end
 
--- (Optional) Return the command spec for the CLI's native session picker.
--- If provided, the `h` keymap will open it. If omitted, `h` shows a warning.
+-- (Optional) Native session picker — powers the `h` keymap
 function M.resume_cmd(opts)
-  -- opts: { cwd }
   return { cmd = "myai", args = { "--resume" }, cwd = opts.cwd }
 end
 
@@ -144,6 +139,13 @@ require("neocode").setup({
 
 ## How it works
 
-NeoCode spawns each AI CLI as a Neovim terminal job (`vim.fn.termopen`) in a vertical split. The CLI owns its own rendering and session history — NeoCode only manages the window lifecycle and convenience keymaps. Every native CLI feature (streaming output, slash commands, keyboard shortcuts, session history) works without any special handling.
+NeoCode spawns each AI CLI as a Neovim terminal job (`vim.fn.termopen`) in a vertical split. The CLI owns its own rendering and session history — NeoCode only manages the window lifecycle and keymaps. Every native CLI feature (streaming, slash commands, shortcuts, history) works without any special handling.
 
-Images are saved to a temp file under `data_dir/images/`, sent to the CLI, and deleted when the session closes or on the next startup if the session crashed.
+Images are saved to a temp file under `data_dir/images/`, sent to the CLI, and cleaned up when the session closes.
+
+## TODO
+
+- [ ] Customizable keymaps
+- [ ] Enable/disable adapters per config
+- [ ] Support for custom credentials per adapter
+- [ ] Auto-install configured CLI if not found
