@@ -47,7 +47,7 @@ function M.toggle(_config)
   local row    = vim.o.lines - height - 3
   local col    = math.floor((vim.o.columns - width) / 2)
 
-  _win = vim.api.nvim_open_win(_buf, false, {
+  _win = vim.api.nvim_open_win(_buf, true, {
     relative = "editor",
     row      = row,
     col      = col,
