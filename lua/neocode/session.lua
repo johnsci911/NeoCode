@@ -157,6 +157,7 @@ function M._open_terminal(record, argv, win, config, opts)
   record.job_id = job_id
 
   vim.wo[win].winbar = config.winbar or ""
+  vim.wo[win].list   = false
   M._register_buf_keymaps(buf, record, config)
 
   if opts.prev_buf then
