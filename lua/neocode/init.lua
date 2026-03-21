@@ -7,7 +7,7 @@ local DEFAULT_CONFIG = {
   keymap_prefix      = "<leader>ai",
   data_dir           = vim.fn.stdpath("data") .. "/neocode",
   telescope_fallback = true,
-  winbar             = "  ? help  h resume  i input  <leader>p image  <C-c> stop  { } cycle\n",
+  winbar             = "  ? help  h resume  i input  <leader>p image  <C-c> stop  H toggle  { } cycle\n",
   adapters           = {},
 }
 
@@ -27,6 +27,10 @@ function M._register_global_keymaps()
   vim.keymap.set("n", prefix .. "C", function()
     require("neocode.launcher").open(M._config)
   end, { desc = "NeoCode: launcher" })
+
+  vim.keymap.set("n", prefix .. "H", function()
+    require("neocode.session").toggle(M._config)
+  end, { desc = "NeoCode: toggle window" })
 end
 
 function M.setup(opts)

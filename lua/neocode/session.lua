@@ -274,6 +274,40 @@ function M.pick(config)
   end
 end
 
+-- ── Toggle (hide / show) ──────────────────────────────────────────────
+
+function M.hide()
+  local s = M._current()
+  if not s or not s.winid or not vim.api.nvim_win_is_valid(s.winid) then return end
+  vim.api.nvim_win_close(s.winid, false)
+  s.winid = nil
+end
+
+function M.show(config)
+  local s = M._current()
+  if not s or not s.bufnr or not vim.api.nvim_buf_is_valid(s.bufnr) then return end
+  if s.winid and vim.api.nvim_win_is_valid(s.winid) then
+    vim.api.nvim_set_current_win(s.winid)
+    return
+  end
+  vim.cmd("vsplit")
+  local win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(win, s.bufnr)
+  s.winid = win
+  vim.wo[win].winbar = config.winbar or ""
+  vim.wo[win].list = false
+  vim.cmd("startinsert")
+end
+
+function M.toggle(config)
+  local s = M._current()
+  if s and s.winid and vim.api.nvim_win_is_valid(s.winid) then
+    M.hide()
+  else
+    M.show(config)
+  end
+end
+
 -- ── Buffer-local keymaps ───────────────────────────────────────────────
 
 function M._register_buf_keymaps(buf, record, config)
@@ -322,6 +356,9 @@ function M._register_buf_keymaps(buf, record, config)
     local argv     = vim.list_extend({ spec.cmd }, spec.args or {})
     M._open_terminal(new_record, argv, win, config, { prev_buf = prev_buf })
   end, opts)
+
+  -- H hides the NeoCode window
+  vim.keymap.set("n", "H", function() M.toggle(config) end, opts)
 
   -- i opens multi-line input window
   vim.keymap.set("n", "i", function()

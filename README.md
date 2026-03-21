@@ -40,6 +40,7 @@ No fancy UI, just plain simple native AI CLI experience inside Neovim.
 | Keymap | Action |
 |--------|--------|
 | `<leader>aiC` | Open launcher — pick a CLI and start a new session |
+| `<leader>aiH` | Toggle NeoCode window (show/hide) |
 
 ### Inside a chat session (normal mode)
 
@@ -51,7 +52,7 @@ No fancy UI, just plain simple native AI CLI experience inside Neovim.
 | `<C-c>` | Interrupt the AI |
 | `{` / `}` | Cycle between open windows |
 | `<S-p>` | Window picker |
-| `H` | Hide chat window |
+| `H` | Toggle window (hide/show) |
 | `?` | Toggle hint overlay |
 
 > **Tip:** Press `<C-\><C-n>` to leave terminal mode first.
