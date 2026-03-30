@@ -56,7 +56,7 @@ describe("neocode.setup", function()
     local maps = vim.api.nvim_get_keymap("n")
     local found = false
     for _, m in ipairs(maps) do
-      if m.lhs == "\\aiC" or m.lhs == "<leader>aiC" then found = true end
+      if m.lhs == "\\aic" or m.lhs == "<leader>aic" then found = true end
     end
     assert.is_true(found)
   end)

@@ -7,7 +7,7 @@ local _current_id = nil
 -- Counter for unique id generation (avoids same-second timestamp collisions)
 local _counter = 0
 
--- ── Internal helpers (prefixed _ for testing access) ──────────────────
+-- Internal helpers (prefixed _ for testing access)
 
 function M._reset()
   _sessions  = {}
@@ -58,7 +58,7 @@ function M._current()
   return _current_id and _sessions[_current_id]
 end
 
--- ── Persistence ────────────────────────────────────────────────────────
+-- Persistence
 
 local function _sessions_path(config)
   return config.data_dir .. "/sessions.json"
@@ -128,7 +128,7 @@ function M.rename_on_disk(session_id, new_title, config)
   _write_sessions_json(_sessions_path(config), all)
 end
 
--- ── Terminal lifecycle ─────────────────────────────────────────────────
+-- Terminal lifecycle
 
 -- Spawn a terminal job in `win` for `record` using command `argv`.
 -- opts.prev_buf: if set, <Esc> in terminal mode cancels and returns to that buf.
@@ -176,7 +176,7 @@ function M._open_terminal(record, argv, win, config, opts)
   vim.cmd("startinsert")
 end
 
--- ── Public API ─────────────────────────────────────────────────────────
+-- Public API
 
 -- Create and open a new session in a vertical split terminal buffer.
 function M.create(adapter, title, config)
@@ -274,7 +274,7 @@ function M.pick(config)
   end
 end
 
--- ── Toggle (hide / show) ──────────────────────────────────────────────
+-- Toggle (hide / show)
 
 function M.hide()
   local s = M._current()
@@ -308,7 +308,7 @@ function M.toggle(config)
   end
 end
 
--- ── Buffer-local keymaps ───────────────────────────────────────────────
+-- Buffer-local keymaps
 
 function M._register_buf_keymaps(buf, record, config)
   local opts = { buffer = buf, silent = true }

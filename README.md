@@ -39,8 +39,8 @@ No fancy UI, just plain simple native AI CLI experience inside Neovim.
 
 | Keymap | Action |
 |--------|--------|
-| `<leader>aiC` | Open launcher — pick a CLI and start a new session |
-| `<leader>aiH` | Toggle NeoCode window (show/hide) |
+| `<leader>aic` | Open launcher — pick a CLI and start a new session |
+| `<leader>aiC` | Toggle NeoCode window (show/hide) |
 
 ### Inside a chat session (normal mode)
 

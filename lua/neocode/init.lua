@@ -24,11 +24,11 @@ end
 
 function M._register_global_keymaps()
   local prefix = M._config.keymap_prefix
-  vim.keymap.set("n", prefix .. "C", function()
+  vim.keymap.set("n", prefix .. "c", function()
     require("neocode.launcher").open(M._config)
   end, { desc = "NeoCode: launcher" })
 
-  vim.keymap.set("n", prefix .. "H", function()
+  vim.keymap.set("n", prefix .. "C", function()
     require("neocode.session").toggle(M._config)
   end, { desc = "NeoCode: toggle window" })
 end
