@@ -38,16 +38,29 @@ function M.stream(messages, bufnr, on_done)
 
   -- Filter out empty assistant messages to avoid conflicts with thinking mode
   local filtered = {}
+  local has_system = false
   for _, msg in ipairs(messages) do
+    if msg.role == "system" then has_system = true end
     if not (msg.role == "assistant" and (msg.content == nil or msg.content == "")) then
       table.insert(filtered, msg)
     end
+  end
+
+  -- Add system prompt if none exists to reduce hallucination
+  if not has_system and cfg.system_prompt ~= false then
+    table.insert(filtered, 1, {
+      role = "system",
+      content = cfg.system_prompt or "You are a helpful assistant. Be concise and accurate. Do not repeat yourself. If you are unsure, say so.",
+    })
   end
 
   local payload = vim.fn.json_encode({
     model = cfg.model,
     messages = filtered,
     stream = true,
+    temperature = cfg.temperature or 0.7,
+    top_p = cfg.top_p or 0.9,
+    repeat_penalty = cfg.repeat_penalty or 1.3,
   })
 
   local full_response = {}
@@ -103,7 +116,7 @@ function M.stream(messages, bufnr, on_done)
                 end
                 if count >= repetition_threshold then
                   vim.schedule(function()
-                    vim.fn.jobstop(job_id)
+                    pcall(vim.fn.jobstop, job_id)
                     vim.bo[bufnr].modifiable = true
                     local lc = vim.api.nvim_buf_line_count(bufnr)
                     vim.api.nvim_buf_set_lines(bufnr, lc, lc, false,
