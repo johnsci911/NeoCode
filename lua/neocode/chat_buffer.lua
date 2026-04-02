@@ -12,6 +12,8 @@ function M.render_lines(messages)
   if #messages == 0 then return {} end
   local lines = {}
   for _, msg in ipairs(messages) do
+    -- Hide system messages from the chat display
+    if msg.role == "system" then goto continue end
     table.insert(lines, "")
     table.insert(lines, ROLE_HEADERS[msg.role] or ("### " .. msg.role))
     table.insert(lines, "")
@@ -32,6 +34,7 @@ function M.render_lines(messages)
     end
     table.insert(lines, "")
     table.insert(lines, "---")
+    ::continue::
   end
   return lines
 end

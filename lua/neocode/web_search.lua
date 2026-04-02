@@ -90,7 +90,7 @@ function M.search(query, callback)
 import json, sys
 try:
     from duckduckgo_search import DDGS
-    results = DDGS().text(%s, max_results=5)
+    results = DDGS().text(%s, max_results=5, region="wt-wt")
     out = []
     for r in results:
         out.append({"title": r.get("title",""), "body": r.get("body",""), "href": r.get("href","")})
