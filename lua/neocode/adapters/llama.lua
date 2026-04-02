@@ -31,7 +31,7 @@ function M._build_user_message(text, image_base64)
 end
 
 -- Send messages to llama-server and stream the response into the buffer.
--- Calls on_done(full_response_text) when finished.
+-- on_done receives (response_text, stats) where stats = { tokens, elapsed, tps, model, thinking_time }
 function M.stream(messages, bufnr, on_done)
   local cfg = M.config or M.defaults
   local url = cfg.base_url .. "/v1/chat/completions"
@@ -65,8 +65,17 @@ function M.stream(messages, bufnr, on_done)
 
   local full_response = {}
   local partial_line = ""
-  local repetition_window = 50  -- check last N tokens for repetition
-  local repetition_threshold = 3 -- stop after pattern repeats this many times
+  local repetition_window = 50
+  local repetition_threshold = 3
+
+  -- Stats tracking
+  local start_time = vim.uv.hrtime()
+  local first_token_time = nil
+  local thinking = true  -- assume thinking until first content token
+  local token_count = 0
+
+  -- Callback to notify phase changes (thinking → generating)
+  local on_phase_change = M._on_phase_change
 
   local job_id = vim.fn.jobstart({
     "curl", "--silent", "--no-buffer",
@@ -94,15 +103,23 @@ function M.stream(messages, bufnr, on_done)
         local ok, chunk = pcall(vim.fn.json_decode, json_str)
         if ok and chunk.choices and chunk.choices[1] then
           local delta = chunk.choices[1].delta
-          -- Skip thinking/reasoning tokens, only render actual content
           local content = delta and delta.content
           if content and type(content) == "string" and content ~= "" then
+            -- Transition from thinking to generating on first real content
+            if thinking then
+              thinking = false
+              first_token_time = vim.uv.hrtime()
+              if on_phase_change then
+                vim.schedule(function() on_phase_change("generating") end)
+              end
+            end
+
+            token_count = token_count + 1
             table.insert(full_response, content)
 
-            -- Repetition detection: check if recent output is repeating
+            -- Repetition detection
             if #full_response >= repetition_window then
               local recent = table.concat(full_response, "", #full_response - repetition_window + 1)
-              -- Find shortest repeating pattern (min 10 chars)
               local len = #recent
               for plen = 10, math.floor(len / repetition_threshold) do
                 local pattern = recent:sub(1, plen)
@@ -130,11 +147,11 @@ function M.stream(messages, bufnr, on_done)
             end
 
             vim.schedule(function()
-              -- Clear spinner/processing line on first token
+              -- Clear spinner line on first token
               if #full_response == 1 then
                 local total = vim.api.nvim_buf_line_count(bufnr)
                 local last = vim.api.nvim_buf_get_lines(bufnr, total - 1, total, false)[1] or ""
-                if last:match("Processing") then
+                if last:match("Thinking") or last:match("Generating") or last:match("Processing") then
                   vim.bo[bufnr].modifiable = true
                   vim.api.nvim_buf_set_lines(bufnr, total - 1, total, false, { "" })
                   vim.bo[bufnr].modifiable = false
@@ -148,7 +165,6 @@ function M.stream(messages, bufnr, on_done)
             end)
           end
         else
-          -- Incomplete JSON line — buffer it
           partial_line = line
         end
 
@@ -158,12 +174,37 @@ function M.stream(messages, bufnr, on_done)
     on_exit = function(_, exit_code, _)
       vim.schedule(function()
         local text = table.concat(full_response)
-        -- Append separator after response
+        local elapsed_ns = vim.uv.hrtime() - start_time
+        local elapsed_s = elapsed_ns / 1e9
+        local thinking_s = first_token_time and ((first_token_time - start_time) / 1e9) or elapsed_s
+        local gen_s = elapsed_s - thinking_s
+        local tps = gen_s > 0 and (token_count / gen_s) or 0
+
+        local stats = {
+          model = cfg.model,
+          tokens = token_count,
+          elapsed = elapsed_s,
+          thinking_time = thinking_s,
+          tps = tps,
+        }
+
+        -- Append stats line after response
         vim.bo[bufnr].modifiable = true
         local lc = vim.api.nvim_buf_line_count(bufnr)
-        vim.api.nvim_buf_set_lines(bufnr, lc, lc, false, { "", "---" })
+        local stats_line = string.format(
+          "  %s │  %d tokens │ ⏱ %.1fs │ ⚡ %.1f t/s",
+          cfg.model, token_count, elapsed_s, tps
+        )
+        if thinking_s > 0.5 then
+          stats_line = string.format(
+            "  %s │  %d tokens │ 💭 %.1fs │ ⏱ %.1fs │ ⚡ %.1f t/s",
+            cfg.model, token_count, thinking_s, elapsed_s, tps
+          )
+        end
+        vim.api.nvim_buf_set_lines(bufnr, lc, lc, false, { "", stats_line, "", "---" })
         vim.bo[bufnr].modifiable = false
-        if on_done then on_done(text) end
+
+        if on_done then on_done(text, stats) end
       end)
     end,
   })

@@ -320,19 +320,21 @@ function M._open_api_input(record, config)
     table.insert(record.messages, { role = "assistant", content = "" })
     vim.bo[record.bufnr].modifiable = true
     local lc = vim.api.nvim_buf_line_count(record.bufnr)
-    vim.api.nvim_buf_set_lines(record.bufnr, lc, lc, false, { "", "### Assistant", "", "  Processing..." })
+    vim.api.nvim_buf_set_lines(record.bufnr, lc, lc, false, { "", "### Assistant", "", "💭 Thinking..." })
     vim.bo[record.bufnr].modifiable = false
-    -- Auto-scroll to spinner
     for _, w in ipairs(vim.fn.win_findbuf(record.bufnr)) do
       local total = vim.api.nvim_buf_line_count(record.bufnr)
       vim.api.nvim_win_set_cursor(w, { total, 0 })
     end
 
-    -- Spinner animation
+    -- Spinner animation with phase tracking
     local spinner_frames = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
     local spinner_idx = 1
     local spinner_active = true
+    local spinner_phase = "thinking"  -- "thinking" or "generating"
+    local phase_start = vim.uv.hrtime()
     local spinner_timer = vim.uv.new_timer()
+
     spinner_timer:start(80, 80, vim.schedule_wrap(function()
       if not spinner_active then return end
       if not vim.api.nvim_buf_is_valid(record.bufnr) then
@@ -343,10 +345,16 @@ function M._open_api_input(record, config)
       spinner_idx = spinner_idx % #spinner_frames + 1
       local total = vim.api.nvim_buf_line_count(record.bufnr)
       local last = vim.api.nvim_buf_get_lines(record.bufnr, total - 1, total, false)[1] or ""
-      if last:match("Processing") then
+      if last:match("Thinking") or last:match("Generating") then
+        local elapsed = (vim.uv.hrtime() - phase_start) / 1e9
+        local label
+        if spinner_phase == "thinking" then
+          label = string.format("%s 💭 Thinking... %.1fs", spinner_frames[spinner_idx], elapsed)
+        else
+          label = string.format("%s ⚡ Generating... %.1fs", spinner_frames[spinner_idx], elapsed)
+        end
         vim.bo[record.bufnr].modifiable = true
-        vim.api.nvim_buf_set_lines(record.bufnr, total - 1, total, false,
-          { spinner_frames[spinner_idx] .. " Processing..." })
+        vim.api.nvim_buf_set_lines(record.bufnr, total - 1, total, false, { label })
         vim.bo[record.bufnr].modifiable = false
       else
         spinner_active = false
@@ -354,10 +362,18 @@ function M._open_api_input(record, config)
       end
     end))
 
-    record.job_id = llama.stream(record.messages, record.bufnr, function(response_text)
-      -- Stop spinner
+    -- Hook into adapter phase change
+    llama._on_phase_change = function(phase)
+      if phase == "generating" then
+        spinner_phase = "generating"
+        phase_start = vim.uv.hrtime()
+      end
+    end
+
+    record.job_id = llama.stream(record.messages, record.bufnr, function(response_text, stats)
       spinner_active = false
       spinner_timer:stop()
+      llama._on_phase_change = nil
 
       record.messages[#record.messages].content = response_text
       record.job_id = nil
