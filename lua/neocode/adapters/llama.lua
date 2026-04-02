@@ -84,6 +84,7 @@ function M.stream(messages, bufnr, on_done)
           if content and type(content) == "string" and content ~= "" then
             table.insert(full_response, content)
             vim.schedule(function()
+              vim.api.nvim_echo({{vim.inspect(content), "Comment"}}, false, {})
               chat_buffer.append_token(bufnr, content)
               for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
                 local lc = vim.api.nvim_buf_line_count(bufnr)
