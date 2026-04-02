@@ -311,76 +311,115 @@ function M._open_api_input(record, config)
     end
     vim.api.nvim_win_close(win, true)
 
-    local user_msg = llama._build_user_message(text, record.pending_image_b64)
-    record.pending_image_b64 = nil
-    table.insert(record.messages, user_msg)
+    local web_search = require("neocode.web_search")
 
-    chat_buffer.refresh(record.bufnr, record.messages)
+    local function do_stream()
+      local user_msg = llama._build_user_message(text, record.pending_image_b64)
+      record.pending_image_b64 = nil
+      table.insert(record.messages, user_msg)
 
-    table.insert(record.messages, { role = "assistant", content = "" })
-    vim.bo[record.bufnr].modifiable = true
-    local lc = vim.api.nvim_buf_line_count(record.bufnr)
-    vim.api.nvim_buf_set_lines(record.bufnr, lc, lc, false, { "", "### Assistant", "", "💭 Thinking..." })
-    vim.bo[record.bufnr].modifiable = false
-    for _, w in ipairs(vim.fn.win_findbuf(record.bufnr)) do
-      local total = vim.api.nvim_buf_line_count(record.bufnr)
-      vim.api.nvim_win_set_cursor(w, { total, 0 })
-    end
+      chat_buffer.refresh(record.bufnr, record.messages)
 
-    -- Spinner animation with phase tracking
-    local spinner_frames = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
-    local spinner_idx = 1
-    local spinner_active = true
-    local spinner_phase = "thinking"  -- "thinking" or "generating"
-    local phase_start = vim.uv.hrtime()
-    local spinner_timer = vim.uv.new_timer()
-
-    spinner_timer:start(80, 80, vim.schedule_wrap(function()
-      if not spinner_active then return end
-      if not vim.api.nvim_buf_is_valid(record.bufnr) then
-        spinner_active = false
-        spinner_timer:stop()
-        return
+      table.insert(record.messages, { role = "assistant", content = "" })
+      vim.bo[record.bufnr].modifiable = true
+      local lc = vim.api.nvim_buf_line_count(record.bufnr)
+      vim.api.nvim_buf_set_lines(record.bufnr, lc, lc, false, { "", "### Assistant", "", "💭 Thinking..." })
+      vim.bo[record.bufnr].modifiable = false
+      for _, w in ipairs(vim.fn.win_findbuf(record.bufnr)) do
+        local total = vim.api.nvim_buf_line_count(record.bufnr)
+        vim.api.nvim_win_set_cursor(w, { total, 0 })
       end
-      spinner_idx = spinner_idx % #spinner_frames + 1
-      local total = vim.api.nvim_buf_line_count(record.bufnr)
-      local last = vim.api.nvim_buf_get_lines(record.bufnr, total - 1, total, false)[1] or ""
-      if last:match("Thinking") or last:match("Generating") then
-        local elapsed = (vim.uv.hrtime() - phase_start) / 1e9
-        local label
-        if spinner_phase == "thinking" then
-          label = string.format("%s 💭 Thinking... %.1fs", spinner_frames[spinner_idx], elapsed)
-        else
-          label = string.format("%s ⚡ Generating... %.1fs", spinner_frames[spinner_idx], elapsed)
+
+      -- Spinner animation with phase tracking
+      local spinner_frames = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
+      local spinner_idx = 1
+      local spinner_active = true
+      local spinner_phase = "thinking"
+      local phase_start = vim.uv.hrtime()
+      local spinner_timer = vim.uv.new_timer()
+
+      spinner_timer:start(80, 80, vim.schedule_wrap(function()
+        if not spinner_active then return end
+        if not vim.api.nvim_buf_is_valid(record.bufnr) then
+          spinner_active = false
+          spinner_timer:stop()
+          return
         end
-        vim.bo[record.bufnr].modifiable = true
-        vim.api.nvim_buf_set_lines(record.bufnr, total - 1, total, false, { label })
-        vim.bo[record.bufnr].modifiable = false
-      else
+        spinner_idx = spinner_idx % #spinner_frames + 1
+        local total = vim.api.nvim_buf_line_count(record.bufnr)
+        local last = vim.api.nvim_buf_get_lines(record.bufnr, total - 1, total, false)[1] or ""
+        if last:match("Thinking") or last:match("Generating") or last:match("Searching") then
+          local elapsed = (vim.uv.hrtime() - phase_start) / 1e9
+          local label
+          if spinner_phase == "searching" then
+            label = string.format("%s 🔍 Searching web... %.1fs", spinner_frames[spinner_idx], elapsed)
+          elseif spinner_phase == "thinking" then
+            label = string.format("%s 💭 Thinking... %.1fs", spinner_frames[spinner_idx], elapsed)
+          else
+            label = string.format("%s ⚡ Generating... %.1fs", spinner_frames[spinner_idx], elapsed)
+          end
+          vim.bo[record.bufnr].modifiable = true
+          vim.api.nvim_buf_set_lines(record.bufnr, total - 1, total, false, { label })
+          vim.bo[record.bufnr].modifiable = false
+        else
+          spinner_active = false
+          spinner_timer:stop()
+        end
+      end))
+
+      llama._on_phase_change = function(phase)
+        if phase == "generating" then
+          spinner_phase = "generating"
+          phase_start = vim.uv.hrtime()
+        end
+      end
+
+      record.job_id = llama.stream(record.messages, record.bufnr, function(response_text, stats)
         spinner_active = false
         spinner_timer:stop()
-      end
-    end))
+        llama._on_phase_change = nil
 
-    -- Hook into adapter phase change
-    llama._on_phase_change = function(phase)
-      if phase == "generating" then
-        spinner_phase = "generating"
-        phase_start = vim.uv.hrtime()
-      end
+        record.messages[#record.messages].content = response_text
+        record.job_id = nil
+
+        local history_dir = config.data_dir .. "/llama"
+        llama_session_mod.save(history_dir, record.id, record.messages)
+      end)
     end
 
-    record.job_id = llama.stream(record.messages, record.bufnr, function(response_text, stats)
-      spinner_active = false
-      spinner_timer:stop()
-      llama._on_phase_change = nil
+    -- Auto-detect if web search is needed
+    if web_search.needs_search(text) then
+      -- Show searching indicator
+      vim.bo[record.bufnr].modifiable = true
+      local lc = vim.api.nvim_buf_line_count(record.bufnr)
+      vim.api.nvim_buf_set_lines(record.bufnr, lc, lc, false, { "", "🔍 Searching web..." })
+      vim.bo[record.bufnr].modifiable = false
 
-      record.messages[#record.messages].content = response_text
-      record.job_id = nil
+      local query = web_search.extract_query(text)
+      web_search.search(query, function(results)
+        -- Clear searching indicator
+        vim.bo[record.bufnr].modifiable = true
+        local total = vim.api.nvim_buf_line_count(record.bufnr)
+        for i = total, 1, -1 do
+          local line = vim.api.nvim_buf_get_lines(record.bufnr, i - 1, i, false)[1] or ""
+          if line:match("Searching web") then
+            vim.api.nvim_buf_set_lines(record.bufnr, i - 1, i, false, {})
+            break
+          end
+        end
+        vim.bo[record.bufnr].modifiable = false
 
-      local history_dir = config.data_dir .. "/llama"
-      llama_session_mod.save(history_dir, record.id, record.messages)
-    end)
+        if results then
+          -- Inject search context as a system message before user's message
+          local ctx = web_search.format_context(query, results)
+          table.insert(record.messages, { role = "system", content = ctx })
+          vim.notify("neocode: web search results injected", vim.log.levels.INFO)
+        end
+        do_stream()
+      end)
+    else
+      do_stream()
+    end
   end
 
   local function paste_image()
