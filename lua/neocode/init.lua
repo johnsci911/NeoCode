@@ -28,12 +28,13 @@ function M._register_global_keymaps()
     require("neocode.launcher").open(M._config)
   end, { desc = "NeoCode: launcher" })
 
-  vim.keymap.set("n", prefix .. "C", function()
+  vim.keymap.set("n", prefix .. "t", function()
     require("neocode.session").toggle(M._config)
   end, { desc = "NeoCode: toggle window" })
 end
 
 function M.setup(opts)
+  if M._initialized then return end
   M._config = vim.tbl_deep_extend("force", DEFAULT_CONFIG, opts or {})
 
   for name, adapter in pairs(M._config.adapters) do
