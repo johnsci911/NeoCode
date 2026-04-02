@@ -259,8 +259,44 @@ function M._open_api_input(record, config)
   local llama_session_mod = require("neocode.llama_session")
   local llama = record.api_adapter
 
-  vim.ui.input({ prompt = "  " }, function(text)
-    if not text or text == "" then return end
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].filetype  = "markdown"
+  vim.bo[buf].bufhidden = "wipe"
+
+  local width  = math.floor(vim.o.columns * 0.7)
+  local height = math.floor(vim.o.lines * 0.3)
+  local row    = math.floor((vim.o.lines - height) / 2)
+  local col    = math.floor((vim.o.columns - width) / 2)
+
+  local title = " NeoCode Input — <C-s> send · <C-v> paste image · <Esc> cancel "
+  if record.pending_image_b64 then
+    title = " NeoCode Input [image attached] — <C-s> send · <Esc> cancel "
+  end
+
+  local win = vim.api.nvim_open_win(buf, true, {
+    relative = "editor",
+    row      = row,
+    col      = col,
+    width    = width,
+    height   = height,
+    style    = "minimal",
+    border   = "rounded",
+    title    = title,
+    title_pos = "center",
+  })
+
+  vim.wo[win].wrap      = true
+  vim.wo[win].linebreak = true
+  vim.cmd("startinsert")
+
+  local function send_and_close()
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    local text  = table.concat(lines, "\n")
+    if text == "" then
+      vim.api.nvim_win_close(win, true)
+      return
+    end
+    vim.api.nvim_win_close(win, true)
 
     local user_msg = llama._build_user_message(text, record.pending_image_b64)
     record.pending_image_b64 = nil
@@ -281,7 +317,40 @@ function M._open_api_input(record, config)
       local history_dir = config.data_dir .. "/llama"
       llama_session_mod.save(history_dir, record.id, record.messages)
     end)
-  end)
+  end
+
+  local function paste_image()
+    local images = require("neocode.images")
+    local path, err = images.save_clipboard(config.data_dir .. "/images", record.id)
+    if not path then
+      vim.notify(err, vim.log.levels.ERROR)
+      return
+    end
+    local f = io.open(path, "rb")
+    if not f then
+      vim.notify("neocode: failed to read image", vim.log.levels.ERROR)
+      return
+    end
+    local data = f:read("*a")
+    f:close()
+    record.pending_image_b64 = vim.base64.encode(data)
+    images.delete_temp(path)
+    -- Update title to show image attached
+    vim.api.nvim_win_set_config(win, {
+      title = " NeoCode Input [image attached] — <C-s> send · <Esc> cancel ",
+      title_pos = "center",
+    })
+    vim.notify("neocode: image attached", vim.log.levels.INFO)
+  end
+
+  local function cancel()
+    vim.api.nvim_win_close(win, true)
+  end
+
+  vim.keymap.set({ "i", "n" }, "<C-s>",  send_and_close, { buffer = buf, silent = true })
+  vim.keymap.set({ "i", "n" }, "<M-CR>", send_and_close, { buffer = buf, silent = true })
+  vim.keymap.set({ "i", "n" }, "<C-v>",  paste_image,    { buffer = buf, silent = true })
+  vim.keymap.set("n", "<Esc>", cancel, { buffer = buf, silent = true })
 end
 
 function M._paste_image_api(record, config)
