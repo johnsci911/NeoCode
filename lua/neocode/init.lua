@@ -34,7 +34,6 @@ function M._register_global_keymaps()
 end
 
 function M.setup(opts)
-  if M._initialized then return end
   M._config = vim.tbl_deep_extend("force", DEFAULT_CONFIG, opts or {})
 
   for name, adapter in pairs(M._config.adapters) do
