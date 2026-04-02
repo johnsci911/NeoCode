@@ -61,10 +61,7 @@ function M.append_token(bufnr, token)
   local line_count = vim.api.nvim_buf_line_count(bufnr)
   local last_line = vim.api.nvim_buf_get_lines(bufnr, line_count - 1, line_count, false)[1] or ""
 
-  local parts = {}
-  for part in (token):gmatch("([^\n]*)") do
-    table.insert(parts, part)
-  end
+  local parts = vim.split(token, "\n", { plain = true })
 
   if #parts == 1 then
     vim.api.nvim_buf_set_lines(bufnr, line_count - 1, line_count, false, { last_line .. parts[1] })
