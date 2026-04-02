@@ -36,9 +36,17 @@ function M.stream(messages, bufnr, on_done)
   local cfg = M.config or M.defaults
   local url = cfg.base_url .. "/v1/chat/completions"
 
+  -- Filter out empty assistant messages to avoid conflicts with thinking mode
+  local filtered = {}
+  for _, msg in ipairs(messages) do
+    if not (msg.role == "assistant" and (msg.content == nil or msg.content == "")) then
+      table.insert(filtered, msg)
+    end
+  end
+
   local payload = vim.fn.json_encode({
     model = cfg.model,
-    messages = messages,
+    messages = filtered,
     stream = true,
   })
 
