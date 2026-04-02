@@ -215,7 +215,7 @@ function M.stream(messages, bufnr, on_done)
 
         -- Context usage
         if total_tokens > 0 then
-          table.insert(parts, string.format("📊 %d/%d (%d%%)", total_tokens, ctx_max, ctx_pct))
+          table.insert(parts, string.format("ctx: %d/%d (%d%%)", total_tokens, ctx_max, ctx_pct))
         end
 
         table.insert(parts, string.format(" %d tokens", completion_tokens))
