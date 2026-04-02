@@ -44,8 +44,11 @@ function M.open(config)
       sorter = conf.generic_sorter({}),
       attach_mappings = function(prompt_bufnr, _)
         actions.select_default:replace(function()
+          local entry = action_state.get_selected_entry()
           actions.close(prompt_bufnr)
-          on_selected(action_state.get_selected_entry().value)
+          if entry then
+            on_selected(entry.value)
+          end
         end)
         return true
       end,
