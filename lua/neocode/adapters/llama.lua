@@ -52,6 +52,8 @@ function M.stream(messages, bufnr, on_done)
 
   local full_response = {}
   local partial_line = ""
+  local repetition_window = 50  -- check last N tokens for repetition
+  local repetition_threshold = 3 -- stop after pattern repeats this many times
 
   local job_id = vim.fn.jobstart({
     "curl", "--silent", "--no-buffer",
@@ -83,6 +85,37 @@ function M.stream(messages, bufnr, on_done)
           local content = delta and delta.content
           if content and type(content) == "string" and content ~= "" then
             table.insert(full_response, content)
+
+            -- Repetition detection: check if recent output is repeating
+            if #full_response >= repetition_window then
+              local recent = table.concat(full_response, "", #full_response - repetition_window + 1)
+              -- Find shortest repeating pattern (min 10 chars)
+              local len = #recent
+              for plen = 10, math.floor(len / repetition_threshold) do
+                local pattern = recent:sub(1, plen)
+                local count = 0
+                for i = 1, len - plen + 1, plen do
+                  if recent:sub(i, i + plen - 1) == pattern then
+                    count = count + 1
+                  else
+                    break
+                  end
+                end
+                if count >= repetition_threshold then
+                  vim.schedule(function()
+                    vim.fn.jobstop(job_id)
+                    vim.bo[bufnr].modifiable = true
+                    local lc = vim.api.nvim_buf_line_count(bufnr)
+                    vim.api.nvim_buf_set_lines(bufnr, lc, lc, false,
+                      { "", "--- [stopped: repetition detected] ---" })
+                    vim.bo[bufnr].modifiable = false
+                    vim.notify("neocode: stopped — repetitive output detected", vim.log.levels.WARN)
+                  end)
+                  return
+                end
+              end
+            end
+
             vim.schedule(function()
               -- Clear spinner/processing line on first token
               if #full_response == 1 then

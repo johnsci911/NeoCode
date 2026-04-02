@@ -245,6 +245,19 @@ function M._register_api_keymaps(buf, record, config)
     M._paste_image_api(record, config)
   end, opts)
 
+  -- Cancel/interrupt streaming response
+  vim.keymap.set("n", "<C-c>", function()
+    if record.job_id then
+      vim.fn.jobstop(record.job_id)
+      record.job_id = nil
+      vim.bo[record.bufnr].modifiable = true
+      local lc = vim.api.nvim_buf_line_count(record.bufnr)
+      vim.api.nvim_buf_set_lines(record.bufnr, lc, lc, false, { "", "--- [cancelled] ---" })
+      vim.bo[record.bufnr].modifiable = false
+      vim.notify("neocode: response cancelled", vim.log.levels.INFO)
+    end
+  end, opts)
+
   vim.keymap.set("n", "}", function() M.cycle("next", config) end, opts)
   vim.keymap.set("n", "{", function() M.cycle("prev", config) end, opts)
   vim.keymap.set("n", "<S-p>", function() M.pick(config) end, opts)
