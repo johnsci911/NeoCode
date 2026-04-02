@@ -15,8 +15,10 @@ vim.api.nvim_create_user_command("NeocodeToggle", function()
   require("neocode.session").toggle(nc._config)
 end, { desc = "Toggle NeoCode window" })
 
-vim.schedule(function()
+-- Fallback: only initialize with defaults if no one has called setup() yet.
+-- Use defer_fn to ensure lazy.nvim config functions have run first.
+vim.defer_fn(function()
   if not require("neocode")._initialized then
     require("neocode").setup({})
   end
-end)
+end, 50)
