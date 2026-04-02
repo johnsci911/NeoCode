@@ -307,10 +307,45 @@ function M._open_api_input(record, config)
     table.insert(record.messages, { role = "assistant", content = "" })
     vim.bo[record.bufnr].modifiable = true
     local lc = vim.api.nvim_buf_line_count(record.bufnr)
-    vim.api.nvim_buf_set_lines(record.bufnr, lc, lc, false, { "", "### Assistant", "" })
+    vim.api.nvim_buf_set_lines(record.bufnr, lc, lc, false, { "", "### Assistant", "", "  Processing..." })
     vim.bo[record.bufnr].modifiable = false
+    -- Auto-scroll to spinner
+    for _, w in ipairs(vim.fn.win_findbuf(record.bufnr)) do
+      local total = vim.api.nvim_buf_line_count(record.bufnr)
+      vim.api.nvim_win_set_cursor(w, { total, 0 })
+    end
+
+    -- Spinner animation
+    local spinner_frames = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
+    local spinner_idx = 1
+    local spinner_active = true
+    local spinner_timer = vim.uv.new_timer()
+    spinner_timer:start(80, 80, vim.schedule_wrap(function()
+      if not spinner_active then return end
+      if not vim.api.nvim_buf_is_valid(record.bufnr) then
+        spinner_active = false
+        spinner_timer:stop()
+        return
+      end
+      spinner_idx = spinner_idx % #spinner_frames + 1
+      local total = vim.api.nvim_buf_line_count(record.bufnr)
+      local last = vim.api.nvim_buf_get_lines(record.bufnr, total - 1, total, false)[1] or ""
+      if last:match("Processing") then
+        vim.bo[record.bufnr].modifiable = true
+        vim.api.nvim_buf_set_lines(record.bufnr, total - 1, total, false,
+          { spinner_frames[spinner_idx] .. " Processing..." })
+        vim.bo[record.bufnr].modifiable = false
+      else
+        spinner_active = false
+        spinner_timer:stop()
+      end
+    end))
 
     record.job_id = llama.stream(record.messages, record.bufnr, function(response_text)
+      -- Stop spinner
+      spinner_active = false
+      spinner_timer:stop()
+
       record.messages[#record.messages].content = response_text
       record.job_id = nil
 

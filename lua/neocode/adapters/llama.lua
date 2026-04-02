@@ -84,6 +84,16 @@ function M.stream(messages, bufnr, on_done)
           if content and type(content) == "string" and content ~= "" then
             table.insert(full_response, content)
             vim.schedule(function()
+              -- Clear spinner/processing line on first token
+              if #full_response == 1 then
+                local total = vim.api.nvim_buf_line_count(bufnr)
+                local last = vim.api.nvim_buf_get_lines(bufnr, total - 1, total, false)[1] or ""
+                if last:match("Processing") then
+                  vim.bo[bufnr].modifiable = true
+                  vim.api.nvim_buf_set_lines(bufnr, total - 1, total, false, { "" })
+                  vim.bo[bufnr].modifiable = false
+                end
+              end
               chat_buffer.append_token(bufnr, content)
               for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
                 local lc = vim.api.nvim_buf_line_count(bufnr)
