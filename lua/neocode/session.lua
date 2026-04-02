@@ -410,10 +410,14 @@ function M._open_api_input(record, config)
         vim.bo[record.bufnr].modifiable = false
 
         if results then
-          -- Inject search context as a system message before user's message
           local ctx = web_search.format_context(query, results)
           table.insert(record.messages, { role = "system", content = ctx })
-          vim.notify("neocode: web search results injected", vim.log.levels.INFO)
+          -- Show search indicator in chat
+          vim.bo[record.bufnr].modifiable = true
+          local total = vim.api.nvim_buf_line_count(record.bufnr)
+          vim.api.nvim_buf_set_lines(record.bufnr, total, total, false,
+            { "🔍 *Web search results injected*", "" })
+          vim.bo[record.bufnr].modifiable = false
         end
         do_stream()
       end)

@@ -13,7 +13,8 @@ local SEARCH_PATTERNS = {
   "price of", "cost of", "weather",
   "2024", "2025", "2026", "2027",
   "right now", "this week", "this month", "this year",
-  "search for", "look up", "find out",
+  "search for", "search the", "look up", "find out",
+  "browse", "@web",
 }
 
 -- Check if a message likely needs web search

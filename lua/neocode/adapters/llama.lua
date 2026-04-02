@@ -50,7 +50,7 @@ function M.stream(messages, bufnr, on_done)
   if not has_system and cfg.system_prompt ~= false then
     table.insert(filtered, 1, {
       role = "system",
-      content = cfg.system_prompt or "You are a helpful assistant. Be concise and accurate. Do not repeat yourself. If you are unsure, say so.",
+      content = cfg.system_prompt or "You are a helpful assistant with web search capabilities. When web search results are provided, use them to give accurate, up-to-date answers and cite the sources. Be concise and accurate. Do not repeat yourself. Do not output thinking tags like <think> or </think>.",
     })
   end
 
@@ -113,6 +113,9 @@ function M.stream(messages, bufnr, on_done)
           local delta = chunk.choices[1].delta
           local content = delta and delta.content
           if content and type(content) == "string" and content ~= "" then
+            -- Filter out think tags
+            content = content:gsub("</?think>", "")
+            if content == "" then goto continue end
             -- Transition from thinking to generating on first real content
             if thinking then
               thinking = false
