@@ -58,6 +58,7 @@ function M.stream(messages, bufnr, on_done)
     model = cfg.model,
     messages = filtered,
     stream = true,
+    stream_options = { include_usage = true },
     temperature = cfg.temperature or 0.7,
     top_p = cfg.top_p or 0.9,
     repeat_penalty = cfg.repeat_penalty or 1.3,
@@ -73,6 +74,7 @@ function M.stream(messages, bufnr, on_done)
   local first_token_time = nil
   local thinking = true  -- assume thinking until first content token
   local token_count = 0
+  local usage_data = nil  -- populated from final chunk
 
   -- Callback to notify phase changes (thinking → generating)
   local on_phase_change = M._on_phase_change
@@ -101,7 +103,13 @@ function M.stream(messages, bufnr, on_done)
         end
 
         local ok, chunk = pcall(vim.fn.json_decode, json_str)
-        if ok and chunk.choices and chunk.choices[1] then
+        if ok and chunk then
+          -- Capture usage data (sent in final chunk)
+          if chunk.usage then
+            usage_data = chunk.usage
+          end
+        end
+        if ok and chunk and chunk.choices and chunk.choices[1] then
           local delta = chunk.choices[1].delta
           local content = delta and delta.content
           if content and type(content) == "string" and content ~= "" then
@@ -180,27 +188,46 @@ function M.stream(messages, bufnr, on_done)
         local gen_s = elapsed_s - thinking_s
         local tps = gen_s > 0 and (token_count / gen_s) or 0
 
+        -- Context usage from server
+        local ctx_max = cfg.context_size or 32768
+        local prompt_tokens = usage_data and usage_data.prompt_tokens or 0
+        local completion_tokens = usage_data and usage_data.completion_tokens or token_count
+        local total_tokens = prompt_tokens + completion_tokens
+        local ctx_pct = ctx_max > 0 and math.floor((total_tokens / ctx_max) * 100) or 0
+
         local stats = {
           model = cfg.model,
           tokens = token_count,
           elapsed = elapsed_s,
           thinking_time = thinking_s,
           tps = tps,
+          prompt_tokens = prompt_tokens,
+          completion_tokens = completion_tokens,
+          total_tokens = total_tokens,
+          context_size = ctx_max,
+          context_pct = ctx_pct,
         }
 
-        -- Append stats line after response
+        -- Build stats line
         vim.bo[bufnr].modifiable = true
         local lc = vim.api.nvim_buf_line_count(bufnr)
-        local stats_line = string.format(
-          "  %s │  %d tokens │ ⏱ %.1fs │ ⚡ %.1f t/s",
-          cfg.model, token_count, elapsed_s, tps
-        )
-        if thinking_s > 0.5 then
-          stats_line = string.format(
-            "  %s │  %d tokens │ 💭 %.1fs │ ⏱ %.1fs │ ⚡ %.1f t/s",
-            cfg.model, token_count, thinking_s, elapsed_s, tps
-          )
+        local parts = { string.format("  %s", cfg.model) }
+
+        -- Context usage
+        if total_tokens > 0 then
+          table.insert(parts, string.format("📊 %d/%d (%d%%)", total_tokens, ctx_max, ctx_pct))
         end
+
+        table.insert(parts, string.format(" %d tokens", completion_tokens))
+
+        if thinking_s > 0.5 then
+          table.insert(parts, string.format("💭 %.1fs", thinking_s))
+        end
+
+        table.insert(parts, string.format("⏱ %.1fs", elapsed_s))
+        table.insert(parts, string.format("⚡ %.1f t/s", tps))
+
+        local stats_line = table.concat(parts, " │ ")
         vim.api.nvim_buf_set_lines(bufnr, lc, lc, false, { "", stats_line, "", "---" })
         vim.bo[bufnr].modifiable = false
 
