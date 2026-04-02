@@ -79,11 +79,12 @@ function M.stream(messages, bufnr, on_done)
         local ok, chunk = pcall(vim.fn.json_decode, json_str)
         if ok and chunk.choices and chunk.choices[1] then
           local delta = chunk.choices[1].delta
-          if delta and delta.content then
-            table.insert(full_response, delta.content)
+          -- Skip thinking/reasoning tokens, only render actual content
+          local content = delta and delta.content
+          if content and type(content) == "string" and content ~= "" then
+            table.insert(full_response, content)
             vim.schedule(function()
-              chat_buffer.append_token(bufnr, delta.content)
-              -- Auto-scroll to bottom
+              chat_buffer.append_token(bufnr, content)
               for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
                 local lc = vim.api.nvim_buf_line_count(bufnr)
                 vim.api.nvim_win_set_cursor(win, { lc, 0 })
