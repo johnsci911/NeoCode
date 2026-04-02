@@ -180,7 +180,11 @@ end
 
 -- Create and open a new session in a vertical split terminal buffer.
 function M.create(adapter, title, config)
-  M._create_with_title(adapter, title, config)
+  if adapter.type == "api" then
+    M.create_api(adapter, title, config)
+  else
+    M._create_with_title(adapter, title, config)
+  end
 end
 
 function M._create_with_title(adapter, title, config)
@@ -193,6 +197,115 @@ function M._create_with_title(adapter, title, config)
   local spec = adapter.launch_cmd({ cwd = vim.fn.getcwd(), name = record.title })
   local argv = vim.list_extend({ spec.cmd }, spec.args or {})
   M._open_terminal(record, argv, win, config)
+end
+
+function M.create_api(adapter, title, config)
+  local chat_buffer = require("neocode.chat_buffer")
+  local llama_session_mod = require("neocode.llama_session")
+
+  local record = M._new_record(adapter.name, title)
+  record.messages = {}
+  record.api_adapter = adapter
+  record.pending_image_b64 = nil
+  M._add(record)
+  _current_id = record.id
+
+  local history_dir = config.data_dir .. "/llama"
+  local saved = llama_session_mod.load(history_dir, record.id)
+  if #saved > 0 then
+    record.messages = saved
+  end
+
+  local buf = chat_buffer.create(record.messages)
+  record.bufnr = buf
+
+  vim.cmd("vsplit")
+  local win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(win, buf)
+  record.winid = win
+
+  vim.wo[win].wrap = true
+  vim.wo[win].linebreak = true
+  vim.wo[win].conceallevel = 2
+  vim.wo[win].winbar = config.winbar or ""
+  vim.wo[win].list = false
+
+  M._register_api_keymaps(buf, record, config)
+  M._persist(config)
+end
+
+function M._register_api_keymaps(buf, record, config)
+  local opts = { buffer = buf, silent = true }
+
+  vim.keymap.set("n", "i", function()
+    M._open_api_input(record, config)
+  end, opts)
+
+  vim.keymap.set("n", "<C-v>", function()
+    M._paste_image_api(record, config)
+  end, opts)
+
+  vim.keymap.set("n", "}", function() M.cycle("next", config) end, opts)
+  vim.keymap.set("n", "{", function() M.cycle("prev", config) end, opts)
+  vim.keymap.set("n", "<S-p>", function() M.pick(config) end, opts)
+  vim.keymap.set("n", "?", function()
+    require("neocode.hints").toggle()
+  end, opts)
+  vim.keymap.set("n", "H", function() M.toggle(config) end, opts)
+end
+
+function M._open_api_input(record, config)
+  local chat_buffer = require("neocode.chat_buffer")
+  local llama_session_mod = require("neocode.llama_session")
+  local llama = record.api_adapter
+
+  vim.ui.input({ prompt = "  " }, function(text)
+    if not text or text == "" then return end
+
+    local user_msg = llama._build_user_message(text, record.pending_image_b64)
+    record.pending_image_b64 = nil
+    table.insert(record.messages, user_msg)
+
+    chat_buffer.refresh(record.bufnr, record.messages)
+
+    table.insert(record.messages, { role = "assistant", content = "" })
+    vim.bo[record.bufnr].modifiable = true
+    local lc = vim.api.nvim_buf_line_count(record.bufnr)
+    vim.api.nvim_buf_set_lines(record.bufnr, lc, lc, false, { "", "### Assistant", "" })
+    vim.bo[record.bufnr].modifiable = false
+
+    record.job_id = llama.stream(record.messages, record.bufnr, function(response_text)
+      record.messages[#record.messages].content = response_text
+      record.job_id = nil
+
+      local history_dir = config.data_dir .. "/llama"
+      llama_session_mod.save(history_dir, record.id, record.messages)
+    end)
+  end)
+end
+
+function M._paste_image_api(record, config)
+  local images = require("neocode.images")
+  local path, err = images.save_clipboard(config.data_dir .. "/images", record.id)
+  if not path then
+    vim.notify(err, vim.log.levels.ERROR)
+    return
+  end
+
+  local f = io.open(path, "rb")
+  if not f then
+    vim.notify("neocode: failed to read image", vim.log.levels.ERROR)
+    return
+  end
+  local data = f:read("*a")
+  f:close()
+
+  local b64 = vim.base64.encode(data)
+  record.pending_image_b64 = b64
+
+  images.delete_temp(path)
+
+  vim.notify("neocode: image attached - type your message with 'i'", vim.log.levels.INFO)
 end
 
 -- Cycle to next/prev session

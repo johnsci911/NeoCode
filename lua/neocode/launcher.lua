@@ -9,7 +9,7 @@ function M.open(config)
   end
   table.sort(adapter_order)
 
-  local label_map = { claude = "  Claude CLI", opencode = "  OpenCode", gemini = "  Gemini CLI" }
+  local label_map = { claude = "  Claude CLI", opencode = "  OpenCode", gemini = "  Gemini CLI", llama = "  Llama (Local)" }
   local entries = {}
   for _, name in ipairs(adapter_order) do
     local display = label_map[name] or ("  " .. name)
