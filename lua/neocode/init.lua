@@ -1,6 +1,7 @@
 local M = {}
 
-local REQUIRED_ADAPTER_FIELDS = { "name", "launch_cmd", "interrupt", "attach_image", "session_store" }
+local REQUIRED_CLI_FIELDS = { "name", "launch_cmd", "interrupt", "attach_image", "session_store" }
+local REQUIRED_API_FIELDS = { "name", "stream", "session_store" }
 
 local DEFAULT_CONFIG = {
   default_adapter    = "claude",
@@ -15,7 +16,8 @@ M._config      = {}
 M._initialized = false
 
 local function validate_adapter(name, adapter)
-  for _, field in ipairs(REQUIRED_ADAPTER_FIELDS) do
+  local fields = adapter.type == "api" and REQUIRED_API_FIELDS or REQUIRED_CLI_FIELDS
+  for _, field in ipairs(fields) do
     if adapter[field] == nil then
       error(string.format("neocode: adapter '%s' is missing required field '%s'", name, field))
     end
