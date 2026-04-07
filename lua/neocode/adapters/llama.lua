@@ -66,9 +66,15 @@ function M.stream(messages, bufnr, on_done, opts)
 
   -- Add system prompt if none exists to reduce hallucination
   if not has_system and cfg.system_prompt ~= false then
+    local default_prompt = "You are a helpful assistant. Be concise and accurate. Do not repeat yourself. Do not output thinking tags like <think> or </think>."
+    -- When tools are available, instruct the model to actually call them
+    if opts and opts.tools and #opts.tools > 0 then
+      default_prompt = default_prompt
+        .. "\n\nYou have access to tools. When the user asks you to do something that requires reading files, searching, listing directories, or any task a tool can handle, you MUST call the appropriate tool using the function calling format. Do NOT describe what you would do -- actually call the tool. Always use tools when they can help answer the user's question."
+    end
     table.insert(filtered, 1, {
       role = "system",
-      content = cfg.system_prompt or "You are a helpful assistant with web search capabilities. When web search results are provided, use them to give accurate, up-to-date answers and cite the sources. Be concise and accurate. Do not repeat yourself. Do not output thinking tags like <think> or </think>.",
+      content = cfg.system_prompt or default_prompt,
     })
   end
 
