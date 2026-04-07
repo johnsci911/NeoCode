@@ -117,6 +117,7 @@ function M.stream(messages, bufnr, on_done, opts)
   local usage_data = nil  -- populated from final chunk
   local accumulated_tool_calls = {}
   local finish_reason = nil
+  local in_think_block = false
 
   -- Callback to notify phase changes (thinking → generating)
   local on_phase_change = M._on_phase_change
@@ -155,11 +156,34 @@ function M.stream(messages, bufnr, on_done, opts)
           local delta = chunk.choices[1].delta
           local content = delta and delta.content
           if content and type(content) == "string" and content ~= "" then
-            -- Filter out think tags
-            content = content:gsub("</?think>", "")
-            if content == "" then goto continue end
-            -- Transition from thinking to generating on first real content
-            if thinking then
+            -- Handle think tags: show thinking as blockquote
+            if content:match("<think>") then
+              in_think_block = true
+              content = content:gsub("<think>", "")
+              -- Add thinking header
+              vim.schedule(function()
+                if not vim.api.nvim_buf_is_valid(bufnr) then return end
+                chat_buffer.append_token(bufnr, "*thinking...*\n> ")
+              end)
+              if content == "" then goto continue end
+            end
+            if content:match("</think>") then
+              in_think_block = false
+              content = content:gsub("</think>", "")
+              -- End thinking block, transition to generating
+              vim.schedule(function()
+                if not vim.api.nvim_buf_is_valid(bufnr) then return end
+                chat_buffer.append_token(bufnr, "\n\n")
+              end)
+              if not thinking then goto continue end
+            end
+            -- Prefix newlines with > inside think blocks
+            if in_think_block then
+              content = content:gsub("\n", "\n> ")
+            end
+
+            -- Transition from thinking to generating on first content outside think block
+            if thinking and not in_think_block and content ~= "" then
               thinking = false
               first_token_time = vim.uv.hrtime()
               if on_phase_change then
@@ -258,6 +282,8 @@ function M.stream(messages, bufnr, on_done, opts)
     on_exit = function(_, exit_code, _)
       vim.schedule(function()
         local text = table.concat(full_response)
+        -- Strip think block content from stored response (keep display clean for history)
+        text = text:gsub("<think>.-</think>", "")
         local elapsed_ns = vim.uv.hrtime() - start_time
         local elapsed_s = elapsed_ns / 1e9
         local thinking_s = first_token_time and ((first_token_time - start_time) / 1e9) or elapsed_s
