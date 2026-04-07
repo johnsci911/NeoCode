@@ -12,12 +12,16 @@ function M.render_lines(messages)
   if #messages == 0 then return {} end
   local lines = {}
   for _, msg in ipairs(messages) do
-    -- Hide system messages from the chat display
+    -- Hide system messages and tool result messages from display
     if msg.role == "system" then goto continue end
+    if msg.role == "tool" then goto continue end
+
     table.insert(lines, "")
     table.insert(lines, ROLE_HEADERS[msg.role] or ("### " .. msg.role))
     table.insert(lines, "")
-    if type(msg.content) == "string" then
+
+    -- Render text content
+    if type(msg.content) == "string" and msg.content ~= "" then
       for line in (msg.content .. "\n"):gmatch("([^\n]*)\n") do
         table.insert(lines, line)
       end
@@ -32,6 +36,43 @@ function M.render_lines(messages)
         end
       end
     end
+
+    -- Render tool calls (Claude Code style summary)
+    if msg.tool_calls then
+      table.insert(lines, "")
+      for _, tc in ipairs(msg.tool_calls) do
+        local fn = tc["function"] or {}
+        local name = fn.name or "unknown"
+        -- Extract display name (remove server prefix)
+        local display = name:match("^.-__(.+)$") or name
+        local args_summary = ""
+        local ok_args, args = pcall(vim.fn.json_decode, fn.arguments or "{}")
+        if ok_args and type(args) == "table" then
+          local parts = {}
+          for k, v in pairs(args) do
+            local val = type(v) == "string" and v or vim.fn.json_encode(v)
+            if #val > 30 then val = val:sub(1, 27) .. "..." end
+            table.insert(parts, k .. '="' .. val .. '"')
+            if #parts >= 2 then break end
+          end
+          args_summary = table.concat(parts, " ")
+        end
+
+        local status = tc._status or "done"
+        local indicator = status == "done" and "[OK]"
+          or status == "error" and "[ERR]"
+          or status == "denied" and "[denied]"
+          or status == "running" and "[...]"
+          or ""
+
+        if args_summary ~= "" then
+          table.insert(lines, string.format("  > %s %s  %s", display, args_summary, indicator))
+        else
+          table.insert(lines, string.format("  > %s  %s", display, indicator))
+        end
+      end
+    end
+
     table.insert(lines, "")
     table.insert(lines, "---")
     ::continue::

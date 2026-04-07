@@ -38,4 +38,25 @@ describe("chat_buffer", function()
     end
     assert.is_true(found_image)
   end)
+
+  it("renders tool calls as summary lines", function()
+    local cb = require("neocode.chat_buffer")
+    local messages = {
+      { role = "user", content = "Read my config" },
+      {
+        role = "assistant",
+        content = "Let me check that.",
+        tool_calls = {
+          { id = "1", type = "function", ["function"] = { name = "filesystem__read_file", arguments = '{"path":"init.lua"}' } },
+        },
+      },
+      { role = "tool", tool_call_id = "1", content = "-- file contents --" },
+      { role = "assistant", content = "Here is your config." },
+    }
+    local lines = cb.render_lines(messages)
+    local text = table.concat(lines, "\n")
+    assert.is_truthy(text:find("read_file"))
+    -- Tool role messages should be hidden
+    assert.is_falsy(text:find("file contents"))
+  end)
 end)
