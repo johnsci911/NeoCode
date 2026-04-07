@@ -44,7 +44,7 @@ end
 
 -- Send messages to llama-server and stream the response into the buffer.
 -- on_done receives (response_text, stats) where stats = { tokens, elapsed, tps, model, thinking_time }
-function M.stream(messages, bufnr, on_done)
+function M.stream(messages, bufnr, on_done, opts)
   local cfg = M.config or M.defaults
 
   -- Auto-detect model from server unless user explicitly configured one
@@ -72,7 +72,7 @@ function M.stream(messages, bufnr, on_done)
     })
   end
 
-  local payload = vim.fn.json_encode({
+  local request_body = {
     model = cfg.model,
     messages = filtered,
     stream = true,
@@ -80,7 +80,15 @@ function M.stream(messages, bufnr, on_done)
     temperature = cfg.temperature or 0.7,
     top_p = cfg.top_p or 0.9,
     repeat_penalty = cfg.repeat_penalty or 1.3,
-  })
+  }
+
+  -- Add tool schemas if provided
+  opts = opts or {}
+  if opts.tools and #opts.tools > 0 then
+    request_body.tools = opts.tools
+  end
+
+  local payload = vim.fn.json_encode(request_body)
 
   local full_response = {}
   local partial_line = ""
@@ -93,6 +101,8 @@ function M.stream(messages, bufnr, on_done)
   local thinking = true  -- assume thinking until first content token
   local token_count = 0
   local usage_data = nil  -- populated from final chunk
+  local accumulated_tool_calls = {}
+  local finish_reason = nil
 
   -- Callback to notify phase changes (thinking → generating)
   local on_phase_change = M._on_phase_change
@@ -195,6 +205,35 @@ function M.stream(messages, bufnr, on_done)
               end
             end)
           end
+
+          -- Accumulate tool_calls from delta
+          if delta and delta.tool_calls then
+            for _, tc in ipairs(delta.tool_calls) do
+              local idx = (tc.index or 0) + 1 -- Lua 1-indexed
+              if not accumulated_tool_calls[idx] then
+                accumulated_tool_calls[idx] = {
+                  id = tc.id or ("call_" .. idx),
+                  type = "function",
+                  ["function"] = { name = "", arguments = "" },
+                }
+              end
+              local acc = accumulated_tool_calls[idx]
+              if tc.id then acc.id = tc.id end
+              if tc["function"] then
+                if tc["function"].name then
+                  acc["function"].name = acc["function"].name .. tc["function"].name
+                end
+                if tc["function"].arguments then
+                  acc["function"].arguments = acc["function"].arguments .. tc["function"].arguments
+                end
+              end
+            end
+          end
+
+          -- Track finish_reason
+          if chunk.choices[1].finish_reason then
+            finish_reason = chunk.choices[1].finish_reason
+          end
         else
           partial_line = line
         end
@@ -233,7 +272,7 @@ function M.stream(messages, bufnr, on_done)
 
         -- Build stats line (buffer may have been closed)
         if not vim.api.nvim_buf_is_valid(bufnr) then
-          if on_done then on_done(text, stats) end
+          if on_done then on_done(text, stats, nil) end
           return
         end
         vim.bo[bufnr].modifiable = true
@@ -258,12 +297,93 @@ function M.stream(messages, bufnr, on_done)
         vim.api.nvim_buf_set_lines(bufnr, lc, lc, false, { "", stats_line, "", "---" })
         vim.bo[bufnr].modifiable = false
 
-        if on_done then on_done(text, stats) end
+        if finish_reason == "tool_calls" and #accumulated_tool_calls > 0 then
+          if on_done then on_done(text, stats, accumulated_tool_calls) end
+        else
+          if on_done then on_done(text, stats, nil) end
+        end
       end)
     end,
   })
 
   return job_id
+end
+
+-- Agentic tool-call loop. Streams a response, executes tool calls, loops until
+-- the model produces a final text answer (or max rounds reached).
+--
+-- opts.tools: array of OpenAI tool schemas
+-- opts.on_tool_call: function(tool_call, callback) -- callback(result_text, is_error)
+-- opts.on_tool_display: function(tool_call, status) -- update chat buffer display
+-- opts.max_rounds: max tool call rounds (default 20)
+function M.stream_with_tools(messages, bufnr, on_done, opts)
+  opts = opts or {}
+  local max_rounds = opts.max_rounds or 20
+  local round = 0
+
+  local function do_round()
+    round = round + 1
+    if round > max_rounds then
+      vim.notify("neocode: max tool call rounds reached (" .. max_rounds .. ")", vim.log.levels.WARN)
+      if on_done then on_done("", {}, nil) end
+      return
+    end
+
+    return M.stream(messages, bufnr, function(response_text, stats, tool_calls)
+      if not tool_calls or #tool_calls == 0 then
+        -- No tool calls: final response
+        if on_done then on_done(response_text, stats, nil) end
+        return
+      end
+
+      -- Model wants to call tools.
+      -- Add assistant message with tool_calls to conversation.
+      local assistant_msg = {
+        role = "assistant",
+        content = response_text ~= "" and response_text or nil,
+        tool_calls = tool_calls,
+      }
+      table.insert(messages, assistant_msg)
+
+      -- Process tool calls sequentially
+      local function process_next(i)
+        if i > #tool_calls then
+          -- All tools executed, loop back for next round
+          vim.schedule(function()
+            -- Add new empty assistant for next stream round
+            table.insert(messages, { role = "assistant", content = "" })
+            do_round()
+          end)
+          return
+        end
+
+        local tc = tool_calls[i]
+        if opts.on_tool_display then
+          opts.on_tool_display(tc, "running")
+        end
+
+        opts.on_tool_call(tc, function(result_text, is_error)
+          -- Add tool result message
+          table.insert(messages, {
+            role = "tool",
+            tool_call_id = tc.id,
+            content = result_text or "",
+          })
+
+          if opts.on_tool_display then
+            opts.on_tool_display(tc, is_error and "error" or "done")
+          end
+
+          -- Process next tool call
+          process_next(i + 1)
+        end)
+      end
+
+      process_next(1)
+    end, { tools = opts.tools })
+  end
+
+  return do_round()
 end
 
 return M
