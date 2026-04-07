@@ -145,6 +145,7 @@ function M.stream(messages, bufnr, on_done)
                 if count >= repetition_threshold then
                   vim.schedule(function()
                     pcall(vim.fn.jobstop, job_id)
+                    if not vim.api.nvim_buf_is_valid(bufnr) then return end
                     vim.bo[bufnr].modifiable = true
                     local lc = vim.api.nvim_buf_line_count(bufnr)
                     vim.api.nvim_buf_set_lines(bufnr, lc, lc, false,
@@ -158,6 +159,7 @@ function M.stream(messages, bufnr, on_done)
             end
 
             vim.schedule(function()
+              if not vim.api.nvim_buf_is_valid(bufnr) then return end
               -- Clear spinner line on first token
               if #full_response == 1 then
                 local total = vim.api.nvim_buf_line_count(bufnr)
@@ -211,7 +213,11 @@ function M.stream(messages, bufnr, on_done)
           context_pct = ctx_pct,
         }
 
-        -- Build stats line
+        -- Build stats line (buffer may have been closed)
+        if not vim.api.nvim_buf_is_valid(bufnr) then
+          if on_done then on_done(text, stats) end
+          return
+        end
         vim.bo[bufnr].modifiable = true
         local lc = vim.api.nvim_buf_line_count(bufnr)
         local parts = { string.format("  %s", cfg.model) }

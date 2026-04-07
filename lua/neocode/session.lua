@@ -265,6 +265,9 @@ function M._register_api_keymaps(buf, record, config)
     require("neocode.hints").toggle()
   end, opts)
   vim.keymap.set("n", "H", function() M.toggle(config) end, opts)
+
+  -- Q closes the session
+  vim.keymap.set("n", "Q", function() M.close(config) end, opts)
 end
 
 function M._open_api_input(record, config)
@@ -340,7 +343,7 @@ function M._open_api_input(record, config)
 
       spinner_timer:start(80, 80, vim.schedule_wrap(function()
         if not spinner_active then return end
-        if not vim.api.nvim_buf_is_valid(record.bufnr) then
+        if not record.bufnr or not vim.api.nvim_buf_is_valid(record.bufnr) then
           spinner_active = false
           spinner_timer:stop()
           return
@@ -563,6 +566,52 @@ function M.pick(config)
   end
 end
 
+-- Close (end session and clean up)
+
+function M.close(config)
+  local s = M._current()
+  if not s then
+    vim.notify("neocode: no active session to close", vim.log.levels.INFO)
+    return
+  end
+
+  local bufnr = s.bufnr
+  local winid = s.winid
+
+  -- Close the window first
+  if winid and vim.api.nvim_win_is_valid(winid) then
+    vim.api.nvim_win_close(winid, true)
+    s.winid = nil
+  end
+
+  -- Stop any running job (for CLI sessions, on_exit handles persist/remove)
+  if s.job_id then
+    pcall(vim.fn.jobstop, s.job_id)
+  end
+
+  -- For API sessions, handle cleanup manually
+  if s.api_adapter then
+    s.status = "closed"
+    s.bufnr = nil
+    s.job_id = nil
+    M._persist(config)
+    M._remove(s.id)
+  end
+
+  -- Clean up pending images
+  if s.pending_image then
+    require("neocode.images").delete_temp(s.pending_image)
+    s.pending_image = nil
+  end
+
+  -- Delete the buffer
+  if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+  end
+
+  vim.notify("neocode: session closed", vim.log.levels.INFO)
+end
+
 -- Toggle (hide / show)
 
 function M.hide()
@@ -648,6 +697,9 @@ function M._register_buf_keymaps(buf, record, config)
 
   -- H hides the NeoCode window
   vim.keymap.set("n", "H", function() M.toggle(config) end, opts)
+
+  -- Q closes the session
+  vim.keymap.set("n", "Q", function() M.close(config) end, opts)
 
   -- i opens multi-line input window
   vim.keymap.set("n", "i", function()
