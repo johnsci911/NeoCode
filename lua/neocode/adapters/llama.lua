@@ -119,7 +119,8 @@ function M.stream(messages, bufnr, on_done, opts)
     stream_options = { include_usage = true },
     temperature = cfg.temperature or 0.7,
     top_p = cfg.top_p or 0.9,
-    repeat_penalty = cfg.repeat_penalty or 1.3,
+    repeat_penalty = cfg.repeat_penalty or 1.1,
+    max_tokens = cfg.max_tokens or 4096,
   }
 
   -- Add tool schemas if provided
