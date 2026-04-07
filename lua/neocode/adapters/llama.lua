@@ -64,6 +64,31 @@ function M.stream(messages, bufnr, on_done, opts)
     end
   end
 
+  -- Trim conversation to fit context: keep system + last N messages
+  local max_messages = cfg.max_messages or 30
+  if #filtered > max_messages then
+    local trimmed = {}
+    -- Keep system messages
+    for _, msg in ipairs(filtered) do
+      if msg.role == "system" then
+        table.insert(trimmed, msg)
+      end
+    end
+    -- Keep the last (max_messages - #system) non-system messages
+    local non_system = {}
+    for _, msg in ipairs(filtered) do
+      if msg.role ~= "system" then
+        table.insert(non_system, msg)
+      end
+    end
+    local keep = max_messages - #trimmed
+    local start = math.max(1, #non_system - keep + 1)
+    for i = start, #non_system do
+      table.insert(trimmed, non_system[i])
+    end
+    filtered = trimmed
+  end
+
   -- Add system prompt if none exists to reduce hallucination
   if not has_system and cfg.system_prompt ~= false then
     local default_prompt = "You are a helpful assistant. Be concise and accurate. Do not repeat yourself. Do not output thinking tags like <think> or </think>."

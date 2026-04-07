@@ -528,6 +528,12 @@ function M._open_api_input(record, config)
         vim.bo[record.bufnr].modifiable = false
 
         if results then
+          -- Remove previous web search system messages to save context
+          for i = #record.messages, 1, -1 do
+            if record.messages[i].role == "system" and record.messages[i].content:match("web search results") then
+              table.remove(record.messages, i)
+            end
+          end
           local ctx = web_search.format_context(query, results)
           table.insert(record.messages, { role = "system", content = ctx })
           -- Show search indicator in chat
