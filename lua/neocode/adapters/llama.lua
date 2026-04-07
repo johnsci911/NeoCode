@@ -259,6 +259,27 @@ function M.stream(messages, bufnr, on_done, opts)
               end
             end
 
+            -- Degenerate output detection: check last 100 tokens for gibberish
+            if token_count > 100 and token_count % 50 == 0 then
+              local window = math.min(100, #full_response)
+              local recent = table.concat(full_response, "", #full_response - window + 1)
+              local alpha = recent:gsub("[^%a ]", "")
+              local ratio = #alpha / math.max(1, #recent)
+              if ratio < 0.3 then
+                vim.schedule(function()
+                  pcall(vim.fn.jobstop, job_id)
+                  if not vim.api.nvim_buf_is_valid(bufnr) then return end
+                  vim.bo[bufnr].modifiable = true
+                  local lc = vim.api.nvim_buf_line_count(bufnr)
+                  vim.api.nvim_buf_set_lines(bufnr, lc, lc, false,
+                    { "", "--- [stopped: degenerate output] ---" })
+                  vim.bo[bufnr].modifiable = false
+                  vim.notify("neocode: stopped — output quality degraded", vim.log.levels.WARN)
+                end)
+                return
+              end
+            end
+
             vim.schedule(function()
               if not vim.api.nvim_buf_is_valid(bufnr) then return end
               -- Clear spinner line on first token

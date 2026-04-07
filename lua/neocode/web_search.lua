@@ -132,10 +132,13 @@ except Exception as e:
             return
           end
 
-          -- Format results
+          -- Format results (limit body length to prevent context overflow)
           local formatted = {}
           for i, r in ipairs(parsed) do
-            table.insert(formatted, string.format("[%d] %s\n%s\nURL: %s", i, r.title, r.body, r.href))
+            local body = r.body or ""
+            if #body > 300 then body = body:sub(1, 300) .. "..." end
+            table.insert(formatted, string.format("[%d] %s\n%s\nURL: %s", i, r.title, body, r.href))
+            if i >= 3 then break end -- max 3 results to save context
           end
 
           if #formatted == 0 then
