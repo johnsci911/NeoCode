@@ -232,6 +232,12 @@ function M.create_api(adapter, title, config)
 
   M._register_api_keymaps(buf, record, config)
   M._persist(config)
+
+  -- Load MCP permissions
+  local ok_perms, mcp_perms = pcall(require, "neocode.mcp_permissions")
+  if ok_perms then
+    mcp_perms.load(config)
+  end
 end
 
 function M._register_api_keymaps(buf, record, config)
@@ -351,11 +357,13 @@ function M._open_api_input(record, config)
         spinner_idx = spinner_idx % #spinner_frames + 1
         local total = vim.api.nvim_buf_line_count(record.bufnr)
         local last = vim.api.nvim_buf_get_lines(record.bufnr, total - 1, total, false)[1] or ""
-        if last:match("Thinking") or last:match("Generating") or last:match("Searching") then
+        if last:match("Thinking") or last:match("Generating") or last:match("Searching") or last:match("Tool") then
           local elapsed = (vim.uv.hrtime() - phase_start) / 1e9
           local label
           if spinner_phase == "searching" then
             label = string.format("%s 🔍 Searching web... %.1fs", spinner_frames[spinner_idx], elapsed)
+          elseif spinner_phase == "tool" then
+            label = string.format("%s 🔧 Running tool... %.1fs", spinner_frames[spinner_idx], elapsed)
           elseif spinner_phase == "thinking" then
             label = string.format("%s 💭 Thinking... %.1fs", spinner_frames[spinner_idx], elapsed)
           else
@@ -377,17 +385,91 @@ function M._open_api_input(record, config)
         end
       end
 
-      record.job_id = llama.stream(record.messages, record.bufnr, function(response_text, stats)
+      -- Check if MCP tools are available
+      local ok_mcp, mcp = pcall(require, "neocode.mcp")
+      local tools = ok_mcp and mcp.available() and mcp.get_all_tools() or nil
+
+      local function on_complete(response_text, stats, _tool_calls)
         spinner_active = false
         spinner_timer:stop()
         llama._on_phase_change = nil
 
-        record.messages[#record.messages].content = response_text
+        -- Find the last real assistant message (not empty placeholders)
+        for i = #record.messages, 1, -1 do
+          if record.messages[i].role == "assistant" then
+            record.messages[i].content = response_text
+            break
+          end
+        end
         record.job_id = nil
+
+        chat_buffer.refresh(record.bufnr, record.messages)
 
         local history_dir = config.data_dir .. "/llama"
         llama_session_mod.save(history_dir, record.id, record.messages)
-      end)
+      end
+
+      if tools and #tools > 0 then
+        -- Use agentic tool-call loop
+        local ok_perms, mcp_perms = pcall(require, "neocode.mcp_permissions")
+
+        record.job_id = llama.stream_with_tools(record.messages, record.bufnr, on_complete, {
+          tools = tools,
+          on_tool_call = function(tool_call, callback)
+            local fn = tool_call["function"] or {}
+            local server = (fn.name or ""):match("^(.-)__") or "unknown"
+            local tool_name = (fn.name or ""):match("__(.+)$") or fn.name or "unknown"
+
+            spinner_phase = "tool"
+            phase_start = vim.uv.hrtime()
+
+            local function execute()
+              mcp.execute_tool_call(tool_call, function(result, is_error)
+                if ok_perms then mcp_perms.consume(server, tool_name) end
+                callback(result, is_error)
+              end)
+            end
+
+            -- Check permissions
+            if ok_perms and mcp_perms.is_allowed(server, tool_name) then
+              execute()
+            elseif ok_perms then
+              local ok_args, args = pcall(vim.fn.json_decode, fn.arguments or "{}")
+              if not ok_args then args = {} end
+              mcp_perms.request(server, tool_name, args, function(allowed)
+                if allowed then
+                  mcp_perms.save(config)
+                  execute()
+                else
+                  callback("Permission denied by user", true)
+                end
+              end)
+            else
+              execute()
+            end
+          end,
+          on_tool_display = function(tool_call, status)
+            -- Update tool call status for rendering
+            for _, msg in ipairs(record.messages) do
+              if msg.tool_calls then
+                for _, tc in ipairs(msg.tool_calls) do
+                  if tc.id == tool_call.id then
+                    tc._status = status
+                  end
+                end
+              end
+            end
+            if record.bufnr and vim.api.nvim_buf_is_valid(record.bufnr) then
+              chat_buffer.refresh(record.bufnr, record.messages)
+            end
+          end,
+        })
+      else
+        -- No MCP tools: use normal streaming
+        record.job_id = llama.stream(record.messages, record.bufnr, function(response_text, stats)
+          on_complete(response_text, stats, nil)
+        end)
+      end
     end
 
     -- Auto-detect if web search is needed
