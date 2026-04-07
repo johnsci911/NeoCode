@@ -344,6 +344,7 @@ function M._open_api_input(record, config)
       local spinner_idx = 1
       local spinner_active = true
       local spinner_phase = "thinking"
+      local spinner_tool_name = nil
       local phase_start = vim.uv.hrtime()
       local spinner_timer = vim.uv.new_timer()
 
@@ -363,7 +364,17 @@ function M._open_api_input(record, config)
           if spinner_phase == "searching" then
             label = string.format("%s 🔍 Searching web... %.1fs", spinner_frames[spinner_idx], elapsed)
           elseif spinner_phase == "tool" then
-            label = string.format("%s 🔧 Running tool... %.1fs", spinner_frames[spinner_idx], elapsed)
+            local tool_label = spinner_tool_name or "tool"
+            local tool_icon = "🔧"
+            local tl = tool_label:lower()
+            if tl:match("read") or tl:match("get") or tl:match("list") or tl:match("search") then
+              tool_icon = "📖"
+            elseif tl:match("write") or tl:match("edit") or tl:match("create") then
+              tool_icon = "✏️"
+            elseif tl:match("run") or tl:match("exec") or tl:match("command") then
+              tool_icon = "⚡"
+            end
+            label = string.format("%s %s %s... %.1fs", spinner_frames[spinner_idx], tool_icon, tool_label, elapsed)
           elseif spinner_phase == "thinking" then
             label = string.format("%s 💭 Thinking... %.1fs", spinner_frames[spinner_idx], elapsed)
           else
@@ -421,6 +432,7 @@ function M._open_api_input(record, config)
             local tool_name = (fn.name or ""):match("__(.+)$") or fn.name or "unknown"
 
             spinner_phase = "tool"
+            spinner_tool_name = tool_name
             phase_start = vim.uv.hrtime()
 
             local function execute()

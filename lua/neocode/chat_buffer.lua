@@ -37,38 +37,63 @@ function M.render_lines(messages)
       end
     end
 
-    -- Render tool calls (Claude Code style summary)
+    -- Render tool calls (Claude Code style)
     if msg.tool_calls then
       table.insert(lines, "")
       for _, tc in ipairs(msg.tool_calls) do
         local fn = tc["function"] or {}
         local name = fn.name or "unknown"
-        -- Extract display name (remove server prefix)
         local display = name:match("^.-__(.+)$") or name
+
+        -- Detect tool action mode from name
+        local icon = "🔧"
+        local lower = display:lower()
+        if lower:match("read") or lower:match("get") or lower:match("list") or lower:match("search") or lower:match("find") then
+          icon = "📖"
+        elseif lower:match("write") or lower:match("edit") or lower:match("create") or lower:match("update") or lower:match("patch") then
+          icon = "✏️"
+        elseif lower:match("delete") or lower:match("remove") then
+          icon = "🗑️"
+        elseif lower:match("run") or lower:match("exec") or lower:match("shell") or lower:match("command") then
+          icon = "⚡"
+        elseif name:match("^mcp_resource__") then
+          icon = "📄"
+        elseif name:match("^mcp_prompt__") then
+          icon = "📋"
+        end
+
+        -- Build args summary
         local args_summary = ""
         local ok_args, args = pcall(vim.fn.json_decode, fn.arguments or "{}")
         if ok_args and type(args) == "table" then
-          local parts = {}
-          for k, v in pairs(args) do
-            local val = type(v) == "string" and v or vim.fn.json_encode(v)
-            if #val > 30 then val = val:sub(1, 27) .. "..." end
-            table.insert(parts, k .. '="' .. val .. '"')
-            if #parts >= 2 then break end
+          -- Show the most relevant arg value directly
+          local primary = args.path or args.uri or args.query or args.command or args.file or args.name
+          if primary then
+            if #primary > 50 then primary = primary:sub(1, 47) .. "..." end
+            args_summary = primary
+          else
+            local parts = {}
+            for k, v in pairs(args) do
+              local val = type(v) == "string" and v or vim.fn.json_encode(v)
+              if #val > 30 then val = val:sub(1, 27) .. "..." end
+              table.insert(parts, k .. "=" .. val)
+              if #parts >= 2 then break end
+            end
+            args_summary = table.concat(parts, " ")
           end
-          args_summary = table.concat(parts, " ")
         end
 
         local status = tc._status or "done"
-        local indicator = status == "done" and "[OK]"
-          or status == "error" and "[ERR]"
-          or status == "denied" and "[denied]"
-          or status == "running" and "[...]"
+        local status_icon = status == "done" and "  ✓"
+          or status == "error" and "  ✗"
+          or status == "denied" and "  ⊘"
+          or status == "running" and "  ..."
           or ""
 
         if args_summary ~= "" then
-          table.insert(lines, string.format("  > %s %s  %s", display, args_summary, indicator))
+          table.insert(lines, string.format("  %s %s %s%s", icon, display, args_summary, status_icon))
         else
-          table.insert(lines, string.format("  > %s  %s", display, indicator))
+          table.insert(lines, string.format("  %s %s%s", icon, display, status_icon))
         end
       end
     end

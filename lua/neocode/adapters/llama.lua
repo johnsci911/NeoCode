@@ -94,6 +94,14 @@ function M.stream(messages, bufnr, on_done, opts)
     request_body.tools = opts.tools
   end
 
+  -- Disable thinking mode when tools are active (faster tool calling)
+  if cfg.thinking == false or (opts.tools and #opts.tools > 0) then
+    request_body.temperature = request_body.temperature or 0.7
+    -- Qwen3 hint: /no_think can be appended, but chat_template control is better
+    -- Some models support this field directly
+    request_body.enable_thinking = false
+  end
+
   local payload = vim.fn.json_encode(request_body)
 
   local full_response = {}

@@ -56,7 +56,31 @@ describe("chat_buffer", function()
     local lines = cb.render_lines(messages)
     local text = table.concat(lines, "\n")
     assert.is_truthy(text:find("read_file"))
+    -- Should show read icon for read operations
+    assert.is_truthy(text:find("📖"))
+    -- Should show file path directly
+    assert.is_truthy(text:find("init.lua"))
     -- Tool role messages should be hidden
     assert.is_falsy(text:find("file contents"))
+  end)
+
+  it("shows correct icons for different tool actions", function()
+    local cb = require("neocode.chat_buffer")
+    local messages = {
+      {
+        role = "assistant",
+        content = "",
+        tool_calls = {
+          { id = "1", type = "function", ["function"] = { name = "fs__write_file", arguments = '{"path":"out.txt"}' } },
+          { id = "2", type = "function", ["function"] = { name = "sh__run_command", arguments = '{"command":"ls"}' } },
+        },
+      },
+    }
+    local lines = cb.render_lines(messages)
+    local text = table.concat(lines, "\n")
+    -- Write operations get edit icon
+    assert.is_truthy(text:find("✏️"))
+    -- Run/exec operations get lightning icon
+    assert.is_truthy(text:find("⚡"))
   end)
 end)
