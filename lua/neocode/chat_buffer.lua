@@ -16,9 +16,17 @@ function M.render_lines(messages)
     if msg.role == "system" then goto continue end
     if msg.role == "tool" then goto continue end
 
-    table.insert(lines, "")
-    table.insert(lines, ROLE_HEADERS[msg.role] or ("### " .. msg.role))
-    table.insert(lines, "")
+    -- Skip header for assistant messages that only have tool_calls (no text)
+    local has_text = (type(msg.content) == "string" and msg.content ~= "")
+      or (type(msg.content) == "table" and #msg.content > 0)
+    local has_tools = msg.tool_calls and #msg.tool_calls > 0
+    local has_stats = msg._stats ~= nil
+
+    if has_text or has_stats or not has_tools then
+      table.insert(lines, "")
+      table.insert(lines, ROLE_HEADERS[msg.role] or ("### " .. msg.role))
+      table.insert(lines, "")
+    end
 
     -- Render text content (with thinking blocks as blockquotes)
     if type(msg.content) == "string" and msg.content ~= "" then
@@ -128,8 +136,11 @@ function M.render_lines(messages)
       end
     end
 
-    table.insert(lines, "")
-    table.insert(lines, "---")
+    -- Only add separator for messages with visible content
+    if has_text or has_stats then
+      table.insert(lines, "")
+      table.insert(lines, "---")
+    end
     ::continue::
   end
   return lines
