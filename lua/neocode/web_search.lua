@@ -89,7 +89,10 @@ function M.search(query, callback)
     local script = string.format([[
 import json, sys
 try:
-    from ddgs import DDGS
+    try:
+        from ddgs import DDGS
+    except ImportError:
+        from duckduckgo_search import DDGS
     results = DDGS().text(%s, max_results=5)
     out = []
     for r in results:
