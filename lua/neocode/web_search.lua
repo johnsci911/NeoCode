@@ -1,5 +1,5 @@
 -- lua/neocode/web_search.lua
--- Web search via DuckDuckGo (using Python duckduckgo-search library)
+-- Web search via DuckDuckGo (using Python ddgs library)
 local M = {}
 
 -- Keywords/patterns that suggest the user needs current information
@@ -60,7 +60,7 @@ function M._ensure_deps(callback)
         return
       end
       vim.fn.jobstart({
-        _venv_dir .. "/bin/pip", "install", "-q", "duckduckgo-search",
+        _venv_dir .. "/bin/pip", "install", "-q", "ddgs",
       }, {
         on_exit = function(_, pip_code)
           vim.schedule(function()
@@ -89,8 +89,8 @@ function M.search(query, callback)
     local script = string.format([[
 import json, sys
 try:
-    from duckduckgo_search import DDGS
-    results = DDGS().text(%s, max_results=5, region="wt-wt")
+    from ddgs import DDGS
+    results = DDGS().text(%s, max_results=5)
     out = []
     for r in results:
         out.append({"title": r.get("title",""), "body": r.get("body",""), "href": r.get("href","")})

@@ -9,11 +9,23 @@ M.session_store = true
 
 M.defaults = {
   base_url = "http://localhost:8080",
-  model = "qwen3.5-9b",
+  model = nil, -- auto-detect from server
 }
 
 function M.setup(opts)
   M.config = vim.tbl_deep_extend("force", M.defaults, opts or {})
+  M._user_configured_model = opts and opts.model ~= nil
+end
+
+-- Query the running server for its loaded model name.
+-- Returns the model id string, or nil on failure.
+function M._detect_model(base_url)
+  local result = vim.fn.system({ "curl", "--silent", "--max-time", "2", base_url .. "/v1/models" })
+  local ok, data = pcall(vim.fn.json_decode, result)
+  if ok and data and data.data and data.data[1] then
+    return data.data[1].id
+  end
+  return nil
 end
 
 -- Build the messages payload, including any pending image.
@@ -34,6 +46,12 @@ end
 -- on_done receives (response_text, stats) where stats = { tokens, elapsed, tps, model, thinking_time }
 function M.stream(messages, bufnr, on_done)
   local cfg = M.config or M.defaults
+
+  -- Auto-detect model from server unless user explicitly configured one
+  if not M._user_configured_model then
+    cfg.model = M._detect_model(cfg.base_url) or cfg.model or "unknown"
+  end
+
   local url = cfg.base_url .. "/v1/chat/completions"
 
   -- Filter out empty assistant messages to avoid conflicts with thinking mode
