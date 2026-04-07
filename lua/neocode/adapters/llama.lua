@@ -54,14 +54,23 @@ function M.stream(messages, bufnr, on_done, opts)
 
   local url = cfg.base_url .. "/v1/chat/completions"
 
-  -- Filter out empty assistant messages to avoid conflicts with thinking mode
+  -- Filter messages: strip think blocks from history, remove empty assistants
   local filtered = {}
   local has_system = false
   for _, msg in ipairs(messages) do
     if msg.role == "system" then has_system = true end
-    if not (msg.role == "assistant" and (msg.content == nil or msg.content == "")) then
+    if msg.role == "assistant" and (msg.content == nil or msg.content == "") then
+      goto skip
+    end
+    -- Strip <think> blocks from assistant messages to save context
+    if msg.role == "assistant" and type(msg.content) == "string" and msg.content:match("<think>") then
+      local clean = msg.content:gsub("<think>.-</think>", ""):gsub("^%s+", "")
+      if clean == "" then goto skip end -- skip if only thinking, no actual content
+      table.insert(filtered, vim.tbl_extend("force", msg, { content = clean }))
+    else
       table.insert(filtered, msg)
     end
+    ::skip::
   end
 
   -- Trim conversation to fit context: keep system + last N messages
@@ -307,8 +316,6 @@ function M.stream(messages, bufnr, on_done, opts)
     on_exit = function(_, exit_code, _)
       vim.schedule(function()
         local text = table.concat(full_response)
-        -- Strip think block content from stored response (keep display clean for history)
-        text = text:gsub("<think>.-</think>", "")
         local elapsed_ns = vim.uv.hrtime() - start_time
         local elapsed_s = elapsed_ns / 1e9
         local thinking_s = first_token_time and ((first_token_time - start_time) / 1e9) or elapsed_s

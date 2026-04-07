@@ -20,9 +20,14 @@ function M.render_lines(messages)
     table.insert(lines, ROLE_HEADERS[msg.role] or ("### " .. msg.role))
     table.insert(lines, "")
 
-    -- Render text content
+    -- Render text content (with thinking blocks as blockquotes)
     if type(msg.content) == "string" and msg.content ~= "" then
-      for line in (msg.content .. "\n"):gmatch("([^\n]*)\n") do
+      local content = msg.content
+      -- Render <think> blocks as blockquotes
+      content = content:gsub("<think>", "\n*thinking...*\n")
+      content = content:gsub("</think>", "\n\n")
+      for line in (content .. "\n"):gmatch("([^\n]*)\n") do
+        -- Indent lines between thinking markers as blockquotes
         table.insert(lines, line)
       end
     elseif type(msg.content) == "table" then
