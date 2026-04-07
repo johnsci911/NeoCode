@@ -98,6 +98,31 @@ function M.render_lines(messages)
       end
     end
 
+    -- Show stats/done indicator for completed assistant messages
+    if msg.role == "assistant" and msg._stats then
+      local s = msg._stats
+      table.insert(lines, "")
+      local parts = {}
+      if s.model then table.insert(parts, s.model) end
+      if s.completion_tokens and s.completion_tokens > 0 then
+        table.insert(parts, string.format("%d tokens", s.completion_tokens))
+      end
+      if s.thinking_time and s.thinking_time > 0.5 then
+        table.insert(parts, string.format("💭 %.1fs", s.thinking_time))
+      end
+      if s.elapsed and s.elapsed > 0 then
+        table.insert(parts, string.format("%.1fs", s.elapsed))
+      end
+      if s.tps and s.tps > 0 then
+        table.insert(parts, string.format("%.1f t/s", s.tps))
+      end
+      if #parts > 0 then
+        table.insert(lines, "✅ " .. table.concat(parts, " · "))
+      else
+        table.insert(lines, "✅ Done")
+      end
+    end
+
     table.insert(lines, "")
     table.insert(lines, "---")
     ::continue::

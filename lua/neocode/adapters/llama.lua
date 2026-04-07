@@ -335,33 +335,6 @@ function M.stream(messages, bufnr, on_done, opts)
           context_pct = ctx_pct,
         }
 
-        -- Build stats line (buffer may have been closed)
-        if not vim.api.nvim_buf_is_valid(bufnr) then
-          if on_done then on_done(text, stats, nil) end
-          return
-        end
-        vim.bo[bufnr].modifiable = true
-        local lc = vim.api.nvim_buf_line_count(bufnr)
-        local parts = { string.format("  %s", cfg.model) }
-
-        -- Context usage
-        if total_tokens > 0 then
-          table.insert(parts, string.format("ctx: %d/%d (%d%%)", total_tokens, ctx_max, ctx_pct))
-        end
-
-        table.insert(parts, string.format(" %d tokens", completion_tokens))
-
-        if thinking_s > 0.5 then
-          table.insert(parts, string.format("💭 %.1fs", thinking_s))
-        end
-
-        table.insert(parts, string.format("⏱ %.1fs", elapsed_s))
-        table.insert(parts, string.format("⚡ %.1f t/s", tps))
-
-        local stats_line = table.concat(parts, " │ ")
-        vim.api.nvim_buf_set_lines(bufnr, lc, lc, false, { "", stats_line, "", "---" })
-        vim.bo[bufnr].modifiable = false
-
         if finish_reason == "tool_calls" and #accumulated_tool_calls > 0 then
           if on_done then on_done(text, stats, accumulated_tool_calls) end
         else

@@ -322,6 +322,8 @@ function M._open_api_input(record, config)
 
     local web_search = require("neocode.web_search")
 
+    local web_search_active = false
+
     local function do_stream()
       local user_msg = llama._build_user_message(text, record.pending_image_b64)
       record.pending_image_b64 = nil
@@ -396,9 +398,12 @@ function M._open_api_input(record, config)
         end
       end
 
-      -- Check if MCP tools are available
+      -- Check if MCP tools are available (skip when web search is active to save context)
       local ok_mcp, mcp = pcall(require, "neocode.mcp")
-      local tools = ok_mcp and mcp.available() and mcp.get_all_tools() or nil
+      local tools = nil
+      if not web_search_active and ok_mcp and mcp.available() then
+        tools = mcp.get_all_tools()
+      end
 
       local function on_complete(response_text, stats, _tool_calls)
         spinner_active = false
@@ -409,9 +414,23 @@ function M._open_api_input(record, config)
         for i = #record.messages, 1, -1 do
           if record.messages[i].role == "assistant" then
             record.messages[i].content = response_text
+            record.messages[i]._stats = stats
             break
           end
         end
+
+        -- Compress old tool results to save context (keep last round's results intact)
+        local tool_msg_count = 0
+        for i = #record.messages, 1, -1 do
+          if record.messages[i].role == "tool" then
+            tool_msg_count = tool_msg_count + 1
+            -- Keep last 3 tool results intact, compress older ones
+            if tool_msg_count > 3 and #(record.messages[i].content or "") > 200 then
+              record.messages[i].content = record.messages[i].content:sub(1, 150) .. "\n...[truncated]"
+            end
+          end
+        end
+
         record.job_id = nil
 
         chat_buffer.refresh(record.bufnr, record.messages)
@@ -505,8 +524,9 @@ function M._open_api_input(record, config)
       end
     end
 
-    -- Auto-detect if web search is needed
+    -- Auto-detect if web search is needed (skip MCP tools when searching)
     if web_search.needs_search(text) then
+      web_search_active = true
       -- Show searching indicator
       vim.bo[record.bufnr].modifiable = true
       local lc = vim.api.nvim_buf_line_count(record.bufnr)
