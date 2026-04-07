@@ -475,6 +475,27 @@ function M._open_api_input(record, config)
               chat_buffer.refresh(record.bufnr, record.messages)
             end
           end,
+          on_round_start = function(round_num)
+            -- Restart spinner for next round
+            spinner_active = true
+            spinner_phase = "thinking"
+            spinner_tool_name = nil
+            phase_start = vim.uv.hrtime()
+
+            if record.bufnr and vim.api.nvim_buf_is_valid(record.bufnr) then
+              vim.bo[record.bufnr].modifiable = true
+              local lc = vim.api.nvim_buf_line_count(record.bufnr)
+              vim.api.nvim_buf_set_lines(record.bufnr, lc, lc, false, {
+                "", "### Assistant", "", "💭 Thinking..."
+              })
+              vim.bo[record.bufnr].modifiable = false
+              -- Scroll to bottom
+              for _, w in ipairs(vim.fn.win_findbuf(record.bufnr)) do
+                local total = vim.api.nvim_buf_line_count(record.bufnr)
+                vim.api.nvim_win_set_cursor(w, { total, 0 })
+              end
+            end
+          end,
         })
       else
         -- No MCP tools: use normal streaming

@@ -364,6 +364,10 @@ function M.stream_with_tools(messages, bufnr, on_done, opts)
         if i > #tool_calls then
           -- All tools executed, loop back for next round
           vim.schedule(function()
+            -- Notify session to restart spinner
+            if opts.on_round_start then
+              opts.on_round_start(round + 1)
+            end
             -- Add new empty assistant for next stream round
             table.insert(messages, { role = "assistant", content = "" })
             do_round()
