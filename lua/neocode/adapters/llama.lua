@@ -141,7 +141,7 @@ function M.stream(messages, bufnr, on_done, opts)
     temperature = cfg.temperature or 0.7,
     top_p = cfg.top_p or 0.9,
     repeat_penalty = cfg.repeat_penalty or 1.1,
-    max_tokens = cfg.max_tokens or 4096,
+    max_tokens = cfg.max_tokens or 16384,
   }
 
   -- Add tool schemas if provided
