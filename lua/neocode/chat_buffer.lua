@@ -11,22 +11,35 @@ local ROLE_HEADERS = {
 function M.render_lines(messages)
   if #messages == 0 then return {} end
   local lines = {}
+  local prev_visible_role = nil
+
   for _, msg in ipairs(messages) do
     -- Hide system messages and tool result messages from display
     if msg.role == "system" then goto continue end
     if msg.role == "tool" then goto continue end
 
-    -- Skip header for assistant messages that only have tool_calls (no text)
     local has_text = (type(msg.content) == "string" and msg.content ~= "")
       or (type(msg.content) == "table" and #msg.content > 0)
     local has_tools = msg.tool_calls and #msg.tool_calls > 0
     local has_stats = msg._stats ~= nil
 
-    if has_text or has_stats or not has_tools then
+    -- Group consecutive assistant messages: only show header for the first one
+    local show_header = true
+    if msg.role == "assistant" and prev_visible_role == "assistant" then
+      show_header = false
+    end
+    -- Tool-only messages (no text, no stats) never get a header
+    if not has_text and not has_stats and has_tools then
+      show_header = false
+    end
+
+    if show_header then
       table.insert(lines, "")
       table.insert(lines, ROLE_HEADERS[msg.role] or ("### " .. msg.role))
       table.insert(lines, "")
     end
+
+    prev_visible_role = msg.role
 
     -- Render text content (with thinking blocks as blockquotes)
     if type(msg.content) == "string" and msg.content ~= "" then
