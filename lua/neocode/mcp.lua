@@ -144,6 +144,33 @@ function M.get_all_tools()
   return schemas
 end
 
+-- Extract text from an mcphub response (handles multiple formats)
+local function extract_response_text(res)
+  if not res then return nil end
+  -- Standard parsed format
+  if res.text and res.text ~= "" then return res.text end
+  -- Raw content array format
+  if res.content and type(res.content) == "table" then
+    local parts = {}
+    for _, item in ipairs(res.content) do
+      if type(item) == "table" and item.text then
+        table.insert(parts, item.text)
+      elseif type(item) == "string" then
+        table.insert(parts, item)
+      end
+    end
+    if #parts > 0 then return table.concat(parts, "\n") end
+  end
+  -- Single string response
+  if type(res) == "string" and res ~= "" then return res end
+  -- Try vim.inspect as last resort for debugging
+  local inspected = vim.inspect(res)
+  if #inspected > 10 and inspected ~= "{\n}" and inspected ~= "{}" then
+    return inspected
+  end
+  return nil
+end
+
 -- Execute a tool call from the model. Routes to the correct handler based on name prefix.
 -- tool_call: { id, function = { name, arguments } }
 -- callback: function(result_text, is_error)
@@ -167,14 +194,14 @@ function M.execute_tool_call(tool_call, callback)
       return
     end
     hub:access_resource(server, uri_safe, {
+      parse_response = true,
       callback = function(res, err)
         vim.schedule(function()
           if err then
             callback("Error: " .. tostring(err), true)
-          elseif res and res.text then
-            callback(res.text, false)
           else
-            callback("(empty resource)", false)
+            local text = extract_response_text(res)
+            callback(text or "(empty resource)", text == nil)
           end
         end)
       end,
@@ -186,6 +213,7 @@ function M.execute_tool_call(tool_call, callback)
       return
     end
     hub:get_prompt(server, prompt_name, args, {
+      parse_response = true,
       callback = function(res, err)
         vim.schedule(function()
           if err then
@@ -193,13 +221,12 @@ function M.execute_tool_call(tool_call, callback)
           elseif res and res.messages then
             local parts = {}
             for _, msg in ipairs(res.messages) do
-              if msg.output and msg.output.text then
-                table.insert(parts, msg.output.text)
-              end
+              local t = extract_response_text(msg.output or msg)
+              if t then table.insert(parts, t) end
             end
-            callback(table.concat(parts, "\n"), false)
+            callback(#parts > 0 and table.concat(parts, "\n") or "(empty prompt)", #parts == 0)
           else
-            callback("(empty prompt)", false)
+            callback("(empty prompt)", true)
           end
         end)
       end,
@@ -212,14 +239,14 @@ function M.execute_tool_call(tool_call, callback)
       return
     end
     hub:call_tool(server, tool_name, args, {
+      parse_response = true,
       callback = function(res, err)
         vim.schedule(function()
           if err then
             callback("Error: " .. tostring(err), true)
-          elseif res and res.text then
-            callback(res.text, false)
           else
-            callback("(empty result)", false)
+            local text = extract_response_text(res)
+            callback(text or "(empty result)", text == nil)
           end
         end)
       end,
