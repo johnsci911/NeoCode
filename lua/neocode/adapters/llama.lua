@@ -238,6 +238,13 @@ function M.stream(messages, bufnr, on_done, opts)
               content = content:gsub("\n", "\n> ")
             end
 
+            -- Filter out <tool_call> XML tags (model sometimes outputs these as text
+            -- instead of using proper structured tool_calls)
+            if content:match("</?tool_call>") then
+              content = content:gsub("</?tool_call>", "")
+              if content:match("^%s*$") then goto continue end
+            end
+
             -- Transition from thinking to generating on first content outside think block
             if thinking and not in_think_block and content ~= "" then
               thinking = false
