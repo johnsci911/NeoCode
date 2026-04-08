@@ -417,8 +417,10 @@ end
 -- opts.max_rounds: max tool call rounds (default 20)
 function M.stream_with_tools(messages, bufnr, on_done, opts)
   opts = opts or {}
-  local max_rounds = opts.max_rounds or 20
+  local max_rounds = opts.max_rounds or 10
   local round = 0
+  local consecutive_errors = 0
+  local max_consecutive_errors = 3
 
   local function do_round()
     round = round + 1
@@ -466,6 +468,13 @@ function M.stream_with_tools(messages, bufnr, on_done, opts)
         end
 
         opts.on_tool_call(tc, function(result_text, is_error)
+          -- Track consecutive errors
+          if is_error then
+            consecutive_errors = consecutive_errors + 1
+          else
+            consecutive_errors = 0
+          end
+
           -- Add tool result message
           table.insert(messages, {
             role = "tool",
@@ -475,6 +484,20 @@ function M.stream_with_tools(messages, bufnr, on_done, opts)
 
           if opts.on_tool_display then
             opts.on_tool_display(tc, is_error and "error" or "done")
+          end
+
+          -- Stop if too many consecutive errors
+          if consecutive_errors >= max_consecutive_errors then
+            vim.schedule(function()
+              vim.notify("neocode: stopped — " .. consecutive_errors .. " consecutive tool errors", vim.log.levels.WARN)
+              -- Add a message telling the model to stop using tools
+              table.insert(messages, {
+                role = "assistant",
+                content = "I've encountered multiple tool errors. Let me answer based on what I know.",
+              })
+              if on_done then on_done("", {}, nil) end
+            end)
+            return
           end
 
           -- Process next tool call
