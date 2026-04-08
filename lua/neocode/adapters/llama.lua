@@ -406,7 +406,34 @@ function M.stream(messages, bufnr, on_done, opts)
         if finish_reason == "tool_calls" and #accumulated_tool_calls > 0 then
           if on_done then on_done(text, stats, accumulated_tool_calls) end
         else
-          if on_done then on_done(text, stats, nil) end
+          -- Fallback: parse <tool_call> XML tags from text (some models use this format)
+          local parsed_tool_calls = {}
+          for tc_content in text:gmatch("<tool_call>(.-)<%/tool_call>") do
+            local tc_json = tc_content:gsub("^%s+", ""):gsub("%s+$", "")
+            local tc_ok, tc_data = pcall(vim.fn.json_decode, tc_json)
+            if tc_ok and type(tc_data) == "table" then
+              local tc_name = tc_data.name or tc_data[1]
+              local tc_args = tc_data.arguments or tc_data.parameters or {}
+              if tc_name then
+                table.insert(parsed_tool_calls, {
+                  id = "text_call_" .. #parsed_tool_calls + 1,
+                  type = "function",
+                  ["function"] = {
+                    name = tc_name,
+                    arguments = vim.fn.json_encode(tc_args),
+                  },
+                })
+              end
+            end
+          end
+
+          if #parsed_tool_calls > 0 then
+            -- Strip tool_call tags from text before passing
+            local clean_text = text:gsub("<tool_call>.-</tool_call>", ""):gsub("^%s+", ""):gsub("%s+$", "")
+            if on_done then on_done(clean_text, stats, parsed_tool_calls) end
+          else
+            if on_done then on_done(text, stats, nil) end
+          end
         end
       end)
     end,
