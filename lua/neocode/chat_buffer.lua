@@ -36,7 +36,9 @@ function M.render_lines(messages)
     if show_header then
       table.insert(lines, "")
       table.insert(lines, ROLE_HEADERS[msg.role] or ("### " .. msg.role))
-      table.insert(lines, "")
+      if has_text then
+        table.insert(lines, "")
+      end
     end
 
     prev_visible_role = msg.role
@@ -65,7 +67,6 @@ function M.render_lines(messages)
 
     -- Render tool calls (Claude Code style)
     if msg.tool_calls then
-      table.insert(lines, "")
       for _, tc in ipairs(msg.tool_calls) do
         local fn = tc["function"] or {}
         local name = fn.name or "unknown"
