@@ -16,6 +16,7 @@ local KEYMAP_LINES = {
   "  <S-p>         Quick session picker",
   "  ?             Toggle this overlay",
   " ──────────────────────────────────────",
+  "  /compact      Summarize conversation",
   "  MCP tools auto-detected via mcphub",
   " ──────────────────────────────────────",
   "  Press ? or q to dismiss",

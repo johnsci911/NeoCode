@@ -276,6 +276,109 @@ function M._register_api_keymaps(buf, record, config)
   vim.keymap.set("n", "Q", function() M.close(config) end, opts)
 end
 
+-- Compact session: summarize conversation to free context
+function M._compact_session(record, config)
+  local chat_buffer = require("neocode.chat_buffer")
+  local llama_session_mod = require("neocode.llama_session")
+  local llama = record.api_adapter
+
+  if #record.messages < 3 then
+    vim.notify("neocode: nothing to compact", vim.log.levels.INFO)
+    return
+  end
+
+  -- Show compacting indicator
+  vim.bo[record.bufnr].modifiable = true
+  local lc = vim.api.nvim_buf_line_count(record.bufnr)
+  vim.api.nvim_buf_set_lines(record.bufnr, lc, lc, false, { "", "🗜️ Compacting conversation..." })
+  vim.bo[record.bufnr].modifiable = false
+
+  -- Build summary request: ask the model to summarize
+  local conversation_text = {}
+  for _, msg in ipairs(record.messages) do
+    if msg.role == "user" and type(msg.content) == "string" then
+      table.insert(conversation_text, "User: " .. msg.content)
+    elseif msg.role == "assistant" and type(msg.content) == "string" and msg.content ~= "" then
+      local clean = msg.content:gsub("<think>.-</think>", ""):gsub("^%s+", "")
+      if clean ~= "" then
+        -- Truncate very long assistant responses
+        if #clean > 500 then clean = clean:sub(1, 500) .. "..." end
+        table.insert(conversation_text, "Assistant: " .. clean)
+      end
+    end
+  end
+
+  local summary_prompt = {
+    { role = "system", content = "Summarize the following conversation in 2-3 concise paragraphs. Capture the key topics discussed, any decisions made, important information shared, and ongoing tasks. This summary will replace the full conversation to save context." },
+    { role = "user", content = table.concat(conversation_text, "\n") },
+  }
+
+  local cfg = llama.config or llama.defaults
+  local url = cfg.base_url .. "/v1/chat/completions"
+  local payload = vim.fn.json_encode({
+    model = cfg.model,
+    messages = summary_prompt,
+    stream = false,
+    temperature = 0.3,
+    max_tokens = 500,
+    enable_thinking = false,
+  })
+
+  vim.fn.jobstart({
+    "curl", "--silent",
+    "-X", "POST", url,
+    "-H", "Content-Type: application/json",
+    "-d", payload,
+  }, {
+    stdout_buffered = true,
+    on_stdout = function(_, data)
+      vim.schedule(function()
+        local raw = table.concat(data or {}, "")
+        local ok, result = pcall(vim.fn.json_decode, raw)
+        local summary = ""
+        if ok and result and result.choices and result.choices[1] then
+          summary = result.choices[1].message and result.choices[1].message.content or ""
+          summary = summary:gsub("<think>.-</think>", ""):gsub("^%s+", "")
+        end
+
+        if summary == "" then
+          vim.notify("neocode: compact failed — could not generate summary", vim.log.levels.WARN)
+          -- Remove compacting indicator
+          if record.bufnr and vim.api.nvim_buf_is_valid(record.bufnr) then
+            chat_buffer.refresh(record.bufnr, record.messages)
+          end
+          return
+        end
+
+        local old_count = #record.messages
+
+        -- Replace all messages with the summary
+        record.messages = {
+          { role = "system", content = "Previous conversation summary:\n" .. summary },
+        }
+
+        -- Refresh display
+        chat_buffer.refresh(record.bufnr, record.messages)
+        vim.bo[record.bufnr].modifiable = true
+        local total = vim.api.nvim_buf_line_count(record.bufnr)
+        vim.api.nvim_buf_set_lines(record.bufnr, total, total, false, {
+          "",
+          "🗜️ Conversation compacted (" .. old_count .. " messages → summary)",
+          "",
+          "---",
+        })
+        vim.bo[record.bufnr].modifiable = false
+
+        -- Save compacted history
+        local history_dir = config.data_dir .. "/llama"
+        llama_session_mod.save(history_dir, record.id, record.messages)
+
+        vim.notify("neocode: conversation compacted", vim.log.levels.INFO)
+      end)
+    end,
+  })
+end
+
 function M._open_api_input(record, config)
   local chat_buffer = require("neocode.chat_buffer")
   local llama_session_mod = require("neocode.llama_session")
@@ -319,6 +422,12 @@ function M._open_api_input(record, config)
       return
     end
     vim.api.nvim_win_close(win, true)
+
+    -- Handle /compact command
+    if text:match("^%s*/compact") then
+      M._compact_session(record, config)
+      return
+    end
 
     local web_search = require("neocode.web_search")
 
