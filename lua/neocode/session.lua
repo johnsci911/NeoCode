@@ -426,9 +426,10 @@ function M._compact_session(record, config)
 
         local old_count = #record.messages
 
-        -- Replace all messages with the summary
+        -- Replace all messages with the summary as a conversation exchange
         record.messages = {
-          { role = "system", content = "Previous conversation summary:\n" .. summary },
+          { role = "user", content = "Summarize our conversation so far." },
+          { role = "assistant", content = "Here is a summary of our conversation:\n\n" .. summary },
         }
 
         -- Refresh display
