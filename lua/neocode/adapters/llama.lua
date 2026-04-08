@@ -101,10 +101,31 @@ function M.stream(messages, bufnr, on_done, opts)
   -- Add system prompt if none exists to reduce hallucination
   if not has_system and cfg.system_prompt ~= false then
     local default_prompt = "You are a helpful assistant. Be concise and accurate. Do not repeat yourself. Do not output thinking tags like <think> or </think>."
-    -- When tools are available, instruct the model to actually call them
+    -- When tools are available, add project context and tool instructions
     if opts and opts.tools and #opts.tools > 0 then
-      default_prompt = default_prompt
+      local cwd = vim.fn.getcwd()
+      local is_git = vim.fn.isdirectory(cwd .. "/.git") == 1
+      local project_info = string.format("\n\nCurrent working directory: %s", cwd)
+      if is_git then
+        local branch = vim.fn.system("git -C " .. vim.fn.shellescape(cwd) .. " branch --show-current 2>/dev/null"):gsub("%s+$", "")
+        project_info = project_info .. string.format("\nThis is a git repository (branch: %s)", branch)
+      end
+      -- List top-level files for context
+      local ls = vim.fn.glob(cwd .. "/*", false, true)
+      if #ls > 0 then
+        local names = {}
+        for _, path in ipairs(ls) do
+          local name = vim.fn.fnamemodify(path, ":t")
+          if vim.fn.isdirectory(path) == 1 then name = name .. "/" end
+          table.insert(names, name)
+          if #names >= 15 then break end
+        end
+        project_info = project_info .. "\nTop-level files: " .. table.concat(names, ", ")
+      end
+
+      default_prompt = default_prompt .. project_info
         .. "\n\nYou have access to tools. When the user asks you to do something that requires reading files, searching, listing directories, or any task a tool can handle, you MUST call the appropriate tool using the function calling format. Do NOT describe what you would do -- actually call the tool. Always use tools when they can help answer the user's question."
+        .. "\nWhen accessing files, use absolute paths based on the working directory above."
     end
     table.insert(filtered, 1, {
       role = "system",
