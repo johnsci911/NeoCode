@@ -142,6 +142,12 @@ function M.render_lines(messages)
       if s.tps and s.tps > 0 then
         table.insert(parts, string.format("%.1f t/s", s.tps))
       end
+      if s.prompt_tokens and s.prompt_tokens > 0 then
+        local ctx_max = s.context_size or 32768
+        local used = s.prompt_tokens + (s.completion_tokens or 0)
+        local pct = math.floor((used / ctx_max) * 100)
+        table.insert(parts, string.format("ctx: %d/%d (%d%%)", used, ctx_max, pct))
+      end
       if #parts > 0 then
         table.insert(lines, "✅ " .. table.concat(parts, " · "))
       else

@@ -250,6 +250,16 @@ function M.stream(messages, bufnr, on_done, opts)
             token_count = token_count + 1
             table.insert(full_response, content)
 
+            -- Update live stats for spinner display
+            local now = vim.uv.hrtime()
+            local gen_elapsed = first_token_time and ((now - first_token_time) / 1e9) or 0
+            M._live_stats = {
+              token_count = token_count,
+              tps = gen_elapsed > 0 and (token_count / gen_elapsed) or 0,
+              usage = usage_data,
+              context_size = cfg.context_size or 32768,
+            }
+
             -- Repetition detection
             if #full_response >= repetition_window then
               local recent = table.concat(full_response, "", #full_response - repetition_window + 1)
@@ -358,6 +368,7 @@ function M.stream(messages, bufnr, on_done, opts)
     end,
     on_exit = function(_, exit_code, _)
       vim.schedule(function()
+        M._live_stats = nil
         local text = table.concat(full_response)
         local elapsed_ns = vim.uv.hrtime() - start_time
         local elapsed_s = elapsed_ns / 1e9

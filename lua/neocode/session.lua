@@ -489,7 +489,20 @@ function M._open_api_input(record, config)
           elseif spinner_phase == "thinking" then
             label = string.format("%s 💭 Thinking... %.1fs", spinner_frames[spinner_idx], elapsed)
           else
-            label = string.format("%s ⚡ Generating... %.1fs", spinner_frames[spinner_idx], elapsed)
+            -- Show live t/s and context during generation
+            local live = llama._live_stats
+            local extra = ""
+            if live then
+              if live.tps and live.tps > 0 then
+                extra = extra .. string.format(" · %.1f t/s", live.tps)
+              end
+              if live.usage and live.usage.prompt_tokens then
+                local ctx_max = live.context_size or 32768
+                local used = live.usage.prompt_tokens + (live.token_count or 0)
+                extra = extra .. string.format(" · ctx: %d/%d", used, ctx_max)
+              end
+            end
+            label = string.format("%s ⚡ Generating... %.1fs%s", spinner_frames[spinner_idx], elapsed, extra)
           end
           vim.bo[record.bufnr].modifiable = true
           vim.api.nvim_buf_set_lines(record.bufnr, total - 1, total, false, { label })
