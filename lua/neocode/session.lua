@@ -240,6 +240,59 @@ function M.create_api(adapter, title, config)
   end
 end
 
+-- Resume a saved API session by loading its messages from disk.
+function M.resume_api(adapter, session_data, config)
+  local chat_buffer = require("neocode.chat_buffer")
+  local llama_session_mod = require("neocode.llama_session")
+
+  local record = M._new_record(adapter.name, session_data.title)
+  record.id = session_data.id
+  record.created_at = session_data.created_at
+  record.messages = {}
+  record.api_adapter = adapter
+  record.pending_image_b64 = nil
+  M._add(record)
+  _current_id = record.id
+
+  -- Load saved messages
+  local history_dir = config.data_dir .. "/llama"
+  local saved = llama_session_mod.load(history_dir, record.id)
+  if #saved > 0 then
+    record.messages = saved
+  end
+
+  local buf = chat_buffer.create(record.messages)
+  record.bufnr = buf
+
+  vim.cmd("vsplit")
+  local win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(win, buf)
+  record.winid = win
+
+  vim.wo[win].wrap = true
+  vim.wo[win].linebreak = true
+  vim.wo[win].conceallevel = 2
+  vim.wo[win].winbar = config.winbar or ""
+  vim.wo[win].list = false
+
+  -- Update status and persist
+  record.status = "active"
+  M._register_api_keymaps(buf, record, config)
+  M._persist(config)
+
+  -- Scroll to bottom
+  local total = vim.api.nvim_buf_line_count(buf)
+  vim.api.nvim_win_set_cursor(win, { total, 0 })
+
+  local ok_perms, mcp_perms = pcall(require, "neocode.mcp_permissions")
+  if ok_perms then
+    mcp_perms.load(config)
+  end
+
+  local msg_count = #record.messages
+  vim.notify("neocode: resumed session '" .. record.title .. "' (" .. msg_count .. " messages)", vim.log.levels.INFO)
+end
+
 function M._register_api_keymaps(buf, record, config)
   local opts = { buffer = buf, silent = true }
 
@@ -271,6 +324,11 @@ function M._register_api_keymaps(buf, record, config)
     require("neocode.hints").toggle()
   end, opts)
   vim.keymap.set("n", "H", function() M.toggle(config) end, opts)
+
+  -- h opens session history picker
+  vim.keymap.set("n", "h", function()
+    require("neocode.history").pick(config)
+  end, opts)
 
   -- Q closes the session
   vim.keymap.set("n", "Q", function() M.close(config) end, opts)
@@ -334,15 +392,31 @@ function M._compact_session(record, config)
     on_stdout = function(_, data)
       vim.schedule(function()
         local raw = table.concat(data or {}, "")
+        if raw == "" then
+          vim.notify("neocode: compact failed — no response from model (is it running?)", vim.log.levels.WARN)
+          if record.bufnr and vim.api.nvim_buf_is_valid(record.bufnr) then
+            chat_buffer.refresh(record.bufnr, record.messages)
+          end
+          return
+        end
         local ok, result = pcall(vim.fn.json_decode, raw)
         local summary = ""
         if ok and result and result.choices and result.choices[1] then
           summary = result.choices[1].message and result.choices[1].message.content or ""
-          summary = summary:gsub("<think>.-</think>", ""):gsub("^%s+", "")
+          -- Strip thinking blocks (greedy multiline match)
+          summary = summary:gsub("<think>.+</think>", "")
+          summary = summary:gsub("<think>.*$", "") -- unclosed think block
+          summary = summary:gsub("^%s+", ""):gsub("%s+$", "")
+        elseif ok and result and result.error then
+          vim.notify("neocode: compact failed — " .. tostring(result.error.message or result.error), vim.log.levels.WARN)
+          if record.bufnr and vim.api.nvim_buf_is_valid(record.bufnr) then
+            chat_buffer.refresh(record.bufnr, record.messages)
+          end
+          return
         end
 
         if summary == "" then
-          vim.notify("neocode: compact failed — could not generate summary", vim.log.levels.WARN)
+          vim.notify("neocode: compact failed — model returned empty summary (try again)", vim.log.levels.WARN)
           -- Remove compacting indicator
           if record.bufnr and vim.api.nvim_buf_is_valid(record.bufnr) then
             chat_buffer.refresh(record.bufnr, record.messages)
