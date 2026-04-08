@@ -79,11 +79,18 @@ end
 
 function M._persist(config)
   if not config or not config.data_dir then return end
+
+  -- Load existing closed sessions from disk so they don't get wiped
+  local existing = M.load_all_from_disk(config)
+  local in_memory_ids = {}
   local durable = {}
+
+  -- Add all in-memory sessions
   for _, s in pairs(_sessions) do
     local cfg_adapter    = config.adapters and config.adapters[s.adapter]
     local should_persist = not cfg_adapter or cfg_adapter.session_store ~= false
     if should_persist then
+      in_memory_ids[s.id] = true
       table.insert(durable, {
         id         = s.id,
         adapter    = s.adapter,
@@ -93,6 +100,14 @@ function M._persist(config)
       })
     end
   end
+
+  -- Preserve closed sessions from disk that aren't in memory
+  for _, s in ipairs(existing) do
+    if not in_memory_ids[s.id] and s.status == "closed" then
+      table.insert(durable, s)
+    end
+  end
+
   _write_sessions_json(_sessions_path(config), durable)
 end
 
