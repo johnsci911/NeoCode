@@ -912,14 +912,9 @@ function M.close(config)
     return
   end
 
-  local bufnr = s.bufnr
+  local closed_id = s.id
   local winid = s.winid
-
-  -- Close the window first
-  if winid and vim.api.nvim_win_is_valid(winid) then
-    vim.api.nvim_win_close(winid, true)
-    s.winid = nil
-  end
+  local bufnr = s.bufnr
 
   -- Stop any running job (for CLI sessions, on_exit handles persist/remove)
   if s.job_id then
@@ -944,6 +939,26 @@ function M.close(config)
   -- Delete the buffer
   if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+  end
+
+  -- Switch to another session if one exists, otherwise close the window
+  local remaining = M._all()
+  if #remaining > 0 then
+    local next_session = remaining[1]
+    _current_id = next_session.id
+    if winid and vim.api.nvim_win_is_valid(winid) then
+      if next_session.bufnr and vim.api.nvim_buf_is_valid(next_session.bufnr) then
+        vim.api.nvim_win_set_buf(winid, next_session.bufnr)
+        next_session.winid = winid
+        vim.notify("neocode: switched to '" .. next_session.title .. "'", vim.log.levels.INFO)
+        return
+      end
+    end
+  end
+
+  -- No remaining sessions: close the window
+  if winid and vim.api.nvim_win_is_valid(winid) then
+    vim.api.nvim_win_close(winid, true)
   end
 
   vim.notify("neocode: session closed", vim.log.levels.INFO)
