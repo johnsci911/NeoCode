@@ -71,13 +71,24 @@ function M.pick(config)
           end
         else
           local adapter = config.adapters and config.adapters[sel.adapter]
-          if not adapter or not adapter.resume_cmd then
+          if not adapter then
+            vim.notify("neocode: adapter '" .. sel.adapter .. "' not found", vim.log.levels.ERROR)
+            return
+          end
+
+          -- API adapters: resume by loading saved messages
+          if adapter.type == "api" then
+            session.resume_api(adapter, sel, config)
+            return
+          end
+
+          -- CLI adapters: resume via adapter's resume_cmd
+          if not adapter.resume_cmd then
             vim.notify("neocode: adapter '" .. sel.adapter .. "' does not support resume", vim.log.levels.ERROR)
             return
           end
           local resume_spec = adapter.resume_cmd({ cwd = vim.fn.getcwd() })
 
-          -- Reuse the existing persistent identity (id, title, created_at)
           local record = session._new_record(sel.adapter, sel.title)
           record.id         = sel.id
           record.created_at = sel.created_at

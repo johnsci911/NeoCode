@@ -11,9 +11,13 @@ local KEYMAP_LINES = {
   "  i             Multi-line input",
   "  <leader>p     Paste image",
   "  <C-c>         Interrupt AI",
+  "  Q             Close session",
   "  { / }         Cycle sessions",
   "  <S-p>         Quick session picker",
   "  ?             Toggle this overlay",
+  " ──────────────────────────────────────",
+  "  /compact      Summarize conversation",
+  "  MCP tools auto-detected via mcphub",
   " ──────────────────────────────────────",
   "  Press ? or q to dismiss",
 }

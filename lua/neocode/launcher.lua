@@ -9,7 +9,7 @@ function M.open(config)
   end
   table.sort(adapter_order)
 
-  local label_map = { claude = "  Claude CLI", opencode = "  OpenCode", gemini = "  Gemini CLI" }
+  local label_map = { claude = "  Claude CLI", opencode = "  OpenCode", gemini = "  Gemini CLI", llama = "  Llama (Local)" }
   local entries = {}
   for _, name in ipairs(adapter_order) do
     local display = label_map[name] or ("  " .. name)
@@ -44,8 +44,11 @@ function M.open(config)
       sorter = conf.generic_sorter({}),
       attach_mappings = function(prompt_bufnr, _)
         actions.select_default:replace(function()
+          local entry = action_state.get_selected_entry()
           actions.close(prompt_bufnr)
-          on_selected(action_state.get_selected_entry().value)
+          if entry then
+            on_selected(entry.value)
+          end
         end)
         return true
       end,
