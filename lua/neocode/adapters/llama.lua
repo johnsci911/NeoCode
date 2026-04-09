@@ -527,7 +527,7 @@ function M.stream_with_tools(messages, bufnr, on_done, opts)
           })
 
           if opts.on_tool_display then
-            opts.on_tool_display(tc, is_error and "error" or "done")
+            opts.on_tool_display(tc, is_error and "error" or "done", result_text)
           end
 
           -- Stop if too many consecutive errors

@@ -67,14 +67,14 @@ function M.render_lines(messages)
       end
     end
 
-    -- Render tool calls (Claude Code style)
+    -- Render tool calls (Claude Code style with result preview)
     if msg.tool_calls then
       for _, tc in ipairs(msg.tool_calls) do
         local fn = tc["function"] or {}
         local name = fn.name or "unknown"
         local display = name:match("^.-__(.+)$") or name
 
-        -- Detect tool action mode from name
+        -- Detect tool action icon from name
         local icon = "🔧"
         local lower = display:lower()
         if lower:match("read") or lower:match("get") or lower:match("list") or lower:match("search") or lower:match("find") then
@@ -91,38 +91,50 @@ function M.render_lines(messages)
           icon = "📋"
         end
 
-        -- Build args summary
+        -- Build args for header
         local args_summary = ""
         local ok_args, args = pcall(vim.fn.json_decode, fn.arguments or "{}")
         if ok_args and type(args) == "table" then
-          -- Show the most relevant arg value directly
           local primary = args.path or args.uri or args.query or args.command or args.file or args.name
           if primary then
-            if #primary > 50 then primary = primary:sub(1, 47) .. "..." end
             args_summary = primary
-          else
-            local parts = {}
-            for k, v in pairs(args) do
-              local val = type(v) == "string" and v or vim.fn.json_encode(v)
-              if #val > 30 then val = val:sub(1, 27) .. "..." end
-              table.insert(parts, k .. "=" .. val)
-              if #parts >= 2 then break end
-            end
-            args_summary = table.concat(parts, " ")
           end
         end
 
         local status = tc._status or "done"
-        local status_icon = status == "done" and "  ✓"
-          or status == "error" and "  ✗"
-          or status == "denied" and "  ⊘"
-          or status == "running" and "  ..."
+        local status_icon = status == "done" and " ✓"
+          or status == "error" and " ✗"
+          or status == "denied" and " ⊘"
+          or status == "running" and " ..."
           or ""
 
+        -- Tool header line (like Claude Code)
+        table.insert(lines, "")
         if args_summary ~= "" then
-          table.insert(lines, string.format("  %s %s %s%s", icon, display, args_summary, status_icon))
+          table.insert(lines, string.format("%s **%s**(%s)%s", icon, display, args_summary, status_icon))
         else
-          table.insert(lines, string.format("  %s %s%s", icon, display, status_icon))
+          table.insert(lines, string.format("%s **%s**%s", icon, display, status_icon))
+        end
+
+        -- Result preview (first few lines of output)
+        if tc._result_preview and tc._result_preview ~= "" and tc._result_preview ~= "(empty result)" then
+          local preview = tc._result_preview
+          local preview_lines = {}
+          local total_lines = 0
+          for pline in (preview .. "\n"):gmatch("([^\n]*)\n") do
+            total_lines = total_lines + 1
+            if #preview_lines < 6 then
+              table.insert(preview_lines, "  " .. pline)
+            end
+          end
+          for _, pl in ipairs(preview_lines) do
+            table.insert(lines, pl)
+          end
+          if total_lines > 6 then
+            table.insert(lines, string.format("  *...%d more lines*", total_lines - 6))
+          end
+        elseif status == "error" and tc._result_preview then
+          table.insert(lines, "  " .. tc._result_preview)
         end
       end
     end

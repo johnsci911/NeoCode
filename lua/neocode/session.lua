@@ -700,13 +700,16 @@ function M._open_api_input(record, config)
               execute()
             end
           end,
-          on_tool_display = function(tool_call, status)
-            -- Update tool call status for rendering
+          on_tool_display = function(tool_call, status, result_text)
+            -- Update tool call status and store result preview
             for _, msg in ipairs(record.messages) do
               if msg.tool_calls then
                 for _, tc in ipairs(msg.tool_calls) do
                   if tc.id == tool_call.id then
                     tc._status = status
+                    if result_text then
+                      tc._result_preview = result_text
+                    end
                   end
                 end
               end
