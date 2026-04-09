@@ -528,6 +528,16 @@ function M._open_api_input(record, config)
       record.pending_image_b64 = nil
       table.insert(record.messages, user_msg)
 
+      -- Auto-title from first user message
+      if #record.messages == 1 and type(text) == "string" then
+        local title = text:gsub("\n", " "):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+        if #title > 50 then title = title:sub(1, 47) .. "..." end
+        if title ~= "" then
+          record.title = title
+          M._persist(config)
+        end
+      end
+
       chat_buffer.refresh(record.bufnr, record.messages)
 
       table.insert(record.messages, { role = "assistant", content = "" })
