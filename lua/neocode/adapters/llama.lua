@@ -105,7 +105,8 @@ function M.stream(messages, bufnr, on_done, opts)
     if opts and opts.tools and #opts.tools > 0 then
       local cwd = opts.cwd or vim.fn.getcwd()
       local is_git = vim.fn.isdirectory(cwd .. "/.git") == 1
-      local project_info = string.format("\n\nCurrent working directory: %s", cwd)
+      local home = vim.fn.expand("~")
+      local project_info = string.format("\n\nSystem: macOS, home directory: %s\nCurrent working directory: %s", home, cwd)
       if is_git then
         local branch = vim.fn.system("git -C " .. vim.fn.shellescape(cwd) .. " branch --show-current 2>/dev/null"):gsub("%s+$", "")
         project_info = project_info .. string.format("\nThis is a git repository (branch: %s)", branch)

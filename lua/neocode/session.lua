@@ -694,10 +694,17 @@ function M._open_api_input(record, config)
               local ok_a, a = pcall(vim.fn.json_decode, tc_fn.arguments or "{}")
               if not ok_a or type(a) ~= "table" then return tc end
               local cwd = record.cwd or vim.fn.getcwd()
+              local home = vim.fn.expand("~")
               local changed = false
               for _, key in ipairs({ "path", "file", "directory" }) do
                 if a[key] and type(a[key]) == "string" then
                   local p = a[key]
+                  -- Fix hallucinated home dirs (model outputs /home/user/ on macOS)
+                  if p:match("^/home/[^/]+/") then
+                    p = p:gsub("^/home/[^/]+", home)
+                    a[key] = p
+                    changed = true
+                  end
                   -- Resolve relative paths and ~ to absolute
                   if p == "." or p == "./" then
                     a[key] = cwd
