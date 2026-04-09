@@ -638,6 +638,9 @@ function M._open_api_input(record, config)
         tools = mcp.get_all_tools()
       end
 
+      local auto_continue_count = 0
+      local max_auto_continues = 3
+
       local function on_complete(response_text, stats, _tool_calls)
         spinner_active = false
         spinner_timer:stop()
@@ -657,13 +660,67 @@ function M._open_api_input(record, config)
         for i = #record.messages, 1, -1 do
           if record.messages[i].role == "tool" then
             tool_msg_count = tool_msg_count + 1
-            -- Keep last 3 tool results intact, compress older ones
             if tool_msg_count > 3 and #(record.messages[i].content or "") > 200 then
               record.messages[i].content = record.messages[i].content:sub(1, 150) .. "\n...[truncated]"
             end
           end
         end
 
+        -- Detect truncated/incomplete response and auto-continue
+        local clean = (response_text or ""):gsub("<think>.-</think>", ""):gsub("</?tool_call>", ""):gsub("^%s+", ""):gsub("%s+$", "")
+        local is_truncated = false
+        if clean ~= "" and auto_continue_count < max_auto_continues then
+          -- Check for signs of truncation
+          local last_char = clean:sub(-1)
+          local ends_mid_sentence = not last_char:match("[%.%?!%)%]}\n]")
+          local very_short = #clean < 30 and not clean:match("[%.%?!]")
+          local has_unexecuted_tool = response_text:match("<tool_call>")
+
+          if ends_mid_sentence or very_short or has_unexecuted_tool then
+            is_truncated = true
+          end
+        end
+
+        if is_truncated then
+          auto_continue_count = auto_continue_count + 1
+          -- Auto-continue: add a continue prompt
+          table.insert(record.messages, { role = "user", content = "Continue." })
+
+          -- Show indicator
+          if record.bufnr and vim.api.nvim_buf_is_valid(record.bufnr) then
+            chat_buffer.refresh(record.bufnr, record.messages)
+            vim.bo[record.bufnr].modifiable = true
+            local lc = vim.api.nvim_buf_line_count(record.bufnr)
+            vim.api.nvim_buf_set_lines(record.bufnr, lc, lc, false, {
+              "", "### Assistant", "", "💭 Continuing..."
+            })
+            vim.bo[record.bufnr].modifiable = false
+          end
+
+          -- Restart spinner and stream
+          spinner_active = true
+          spinner_phase = "thinking"
+          spinner_tool_name = nil
+          phase_start = vim.uv.hrtime()
+
+          table.insert(record.messages, { role = "assistant", content = "" })
+          record.job_id = llama.stream(record.messages, record.bufnr, function(cont_text, cont_stats)
+            -- Merge continued response
+            for i = #record.messages, 1, -1 do
+              if record.messages[i].role == "assistant" then
+                record.messages[i].content = cont_text
+                record.messages[i]._stats = cont_stats
+                break
+              end
+            end
+            -- Check again for truncation (recursive via on_complete)
+            on_complete(cont_text, cont_stats, nil)
+          end)
+          return
+        end
+
+        -- Response complete
+        auto_continue_count = 0
         record.job_id = nil
 
         chat_buffer.refresh(record.bufnr, record.messages)
