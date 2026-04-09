@@ -216,10 +216,20 @@ function M.stream(messages, bufnr, on_done, opts)
             if content:match("<think>") then
               in_think_block = true
               content = content:gsub("<think>", "")
-              -- Add thinking header
+              -- Clear spinner line and add thinking header
               vim.schedule(function()
                 if not vim.api.nvim_buf_is_valid(bufnr) then return end
-                chat_buffer.append_token(bufnr, "*thinking...*\n> ")
+                vim.bo[bufnr].modifiable = true
+                local total = vim.api.nvim_buf_line_count(bufnr)
+                local last = vim.api.nvim_buf_get_lines(bufnr, total - 1, total, false)[1] or ""
+                if last:match("Thinking") or last:match("Generating") then
+                  vim.api.nvim_buf_set_lines(bufnr, total - 1, total, false,
+                    { "*thinking...*", "", "> " })
+                else
+                  vim.api.nvim_buf_set_lines(bufnr, total, total, false,
+                    { "*thinking...*", "", "> " })
+                end
+                vim.bo[bufnr].modifiable = false
               end)
               if content == "" then goto continue end
             end

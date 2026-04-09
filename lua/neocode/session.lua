@@ -577,7 +577,16 @@ function M._open_api_input(record, config)
             end
             label = string.format("%s %s %s... %.1fs", spinner_frames[spinner_idx], tool_icon, tool_label, elapsed)
           elseif spinner_phase == "thinking" then
-            label = string.format("%s 💭 Thinking... %.1fs", spinner_frames[spinner_idx], elapsed)
+            -- Show live stats during thinking too
+            local live = llama._live_stats
+            local extra = ""
+            if live and live.token_count and live.token_count > 0 then
+              extra = string.format(" · %d tokens", live.token_count)
+              if live.tps and live.tps > 0 then
+                extra = extra .. string.format(" · %.1f t/s", live.tps)
+              end
+            end
+            label = string.format("%s 💭 Thinking... %.1fs%s", spinner_frames[spinner_idx], elapsed, extra)
           else
             -- Show live t/s and context during generation
             local live = llama._live_stats
