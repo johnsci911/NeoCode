@@ -959,8 +959,35 @@ function M.close(config)
     pcall(vim.fn.jobstop, s.job_id)
   end
 
-  -- For API sessions, handle cleanup manually
+  -- For API sessions, save messages and handle cleanup
   if s.api_adapter then
+    -- Save messages to disk before closing
+    if s.messages and #s.messages > 0 then
+      local llama_session_mod = require("neocode.llama_session")
+      local history_dir = config.data_dir .. "/llama"
+      -- Strip non-serializable runtime fields before saving
+      local save_messages = {}
+      for _, msg in ipairs(s.messages) do
+        local clean = { role = msg.role, content = msg.content }
+        if msg.tool_calls then
+          local clean_tcs = {}
+          for _, tc in ipairs(msg.tool_calls) do
+            table.insert(clean_tcs, {
+              id = tc.id,
+              type = tc.type,
+              ["function"] = tc["function"],
+            })
+          end
+          clean.tool_calls = clean_tcs
+        end
+        if msg.tool_call_id then
+          clean.tool_call_id = msg.tool_call_id
+        end
+        table.insert(save_messages, clean)
+      end
+      llama_session_mod.save(history_dir, s.id, save_messages)
+    end
+
     s.status = "closed"
     s.bufnr = nil
     s.job_id = nil
