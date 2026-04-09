@@ -222,6 +222,7 @@ function M.create_api(adapter, title, config)
   record.messages = {}
   record.api_adapter = adapter
   record.pending_image_b64 = nil
+  record.cwd = vim.fn.getcwd()
   M._add(record)
   _current_id = record.id
 
@@ -263,6 +264,7 @@ function M.resume_api(adapter, session_data, config)
   local record = M._new_record(adapter.name, session_data.title)
   record.id = session_data.id
   record.created_at = session_data.created_at
+  record.cwd = vim.fn.getcwd()
   record.messages = {}
   record.api_adapter = adapter
   record.pending_image_b64 = nil
@@ -676,6 +678,7 @@ function M._open_api_input(record, config)
 
         record.job_id = llama.stream_with_tools(record.messages, record.bufnr, on_complete, {
           tools = tools,
+          cwd = record.cwd,
           on_tool_call = function(tool_call, callback)
             local fn = tool_call["function"] or {}
             local server = (fn.name or ""):match("^(.-)__") or "unknown"

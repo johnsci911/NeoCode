@@ -103,7 +103,7 @@ function M.stream(messages, bufnr, on_done, opts)
     local default_prompt = "You are a helpful assistant. Be concise and accurate. Do not repeat yourself. Do not output thinking tags like <think> or </think>."
     -- When tools are available, add project context and tool instructions
     if opts and opts.tools and #opts.tools > 0 then
-      local cwd = vim.fn.getcwd()
+      local cwd = opts.cwd or vim.fn.getcwd()
       local is_git = vim.fn.isdirectory(cwd .. "/.git") == 1
       local project_info = string.format("\n\nCurrent working directory: %s", cwd)
       if is_git then
@@ -550,7 +550,7 @@ function M.stream_with_tools(messages, bufnr, on_done, opts)
       end
 
       process_next(1)
-    end, { tools = opts.tools })
+    end, { tools = opts.tools, cwd = opts.cwd })
   end
 
   return do_round()
