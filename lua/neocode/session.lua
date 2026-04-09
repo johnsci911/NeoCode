@@ -688,8 +688,38 @@ function M._open_api_input(record, config)
             spinner_tool_name = tool_name
             phase_start = vim.uv.hrtime()
 
+            -- Resolve relative paths in tool arguments to session cwd
+            local function resolve_paths(tc)
+              local tc_fn = tc["function"] or {}
+              local ok_a, a = pcall(vim.fn.json_decode, tc_fn.arguments or "{}")
+              if not ok_a or type(a) ~= "table" then return tc end
+              local cwd = record.cwd or vim.fn.getcwd()
+              local changed = false
+              for _, key in ipairs({ "path", "file", "directory" }) do
+                if a[key] and type(a[key]) == "string" then
+                  local p = a[key]
+                  -- Resolve relative paths and ~ to absolute
+                  if p == "." or p == "./" then
+                    a[key] = cwd
+                    changed = true
+                  elseif not p:match("^/") and not p:match("^~") then
+                    a[key] = cwd .. "/" .. p
+                    changed = true
+                  elseif p:match("^~/") then
+                    a[key] = vim.fn.expand(p)
+                    changed = true
+                  end
+                end
+              end
+              if changed then
+                tc_fn.arguments = vim.fn.json_encode(a)
+              end
+              return tc
+            end
+
             local function execute()
-              mcp.execute_tool_call(tool_call, function(result, is_error)
+              local resolved_tc = resolve_paths(tool_call)
+              mcp.execute_tool_call(resolved_tc, function(result, is_error)
                 if ok_perms then mcp_perms.consume(server, tool_name) end
                 callback(result, is_error)
               end)
