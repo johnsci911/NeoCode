@@ -261,13 +261,31 @@ function M.resume_api(adapter, session_data, config)
   local chat_buffer = require("neocode.chat_buffer")
   local llama_session_mod = require("neocode.llama_session")
 
-  local record = M._new_record(adapter.name, session_data.title)
-  record.id = session_data.id
-  record.created_at = session_data.created_at
-  record.cwd = require("neocode.context").find_project_root()
-  record.messages = {}
-  record.api_adapter = adapter
-  record.pending_image_b64 = nil
+  -- Check if already in memory (avoid duplicates)
+  local existing = M._get(session_data.id)
+  if existing and existing.bufnr and vim.api.nvim_buf_is_valid(existing.bufnr) then
+    _current_id = existing.id
+    vim.api.nvim_set_current_buf(existing.bufnr)
+    return
+  end
+
+  -- Remove stale entry if exists
+  if existing then M._remove(session_data.id) end
+
+  local record = {
+    id            = session_data.id,
+    adapter       = adapter.name,
+    title         = session_data.title,
+    status        = "active",
+    created_at    = session_data.created_at,
+    bufnr         = nil,
+    winid         = nil,
+    job_id        = nil,
+    messages      = {},
+    api_adapter   = adapter,
+    pending_image_b64 = nil,
+    cwd           = require("neocode.context").find_project_root(),
+  }
   M._add(record)
   _current_id = record.id
 

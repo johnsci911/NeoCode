@@ -22,22 +22,25 @@ function M.pick(config)
 
   local function build_entries()
     local all = session.load_all_from_disk(config)
-    -- Merge active in-memory sessions (they may have updated titles)
     local active_map = {}
     for _, s in ipairs(session._all()) do
+      -- Skip empty sessions (no messages sent yet)
+      if not s.messages or #s.messages == 0 then goto skip_mem end
       active_map[s.id] = s
+      ::skip_mem::
     end
+
     local entries = {}
     local seen = {}
+
+    -- Add disk sessions (with in-memory overrides for active ones)
     for _, s in ipairs(all) do
-      local is_active = active_map[s.id] ~= nil or s.status == "active"
-      -- Use in-memory title if available (may have been auto-titled or renamed)
-      local title = (active_map[s.id] and active_map[s.id].title) or s.title
-      local timestamp = ""
-      if s.created_at then
-        timestamp = os.date("%m/%d/%Y %H:%M", s.created_at)
-      end
       seen[s.id] = true
+      local mem = active_map[s.id]
+      local is_active = mem ~= nil
+      local title = (mem and mem.title) or s.title
+      local timestamp = s.created_at and os.date("%m/%d/%Y %H:%M", s.created_at) or ""
+
       table.insert(entries, {
         id         = s.id,
         adapter    = s.adapter,
@@ -48,9 +51,10 @@ function M.pick(config)
           is_active and "●" or "○", title, s.adapter, timestamp),
       })
     end
-    -- Add active sessions not yet persisted to disk
-    for _, s in ipairs(session._all()) do
-      if not seen[s.id] then
+
+    -- Add in-memory sessions not on disk (only if they have messages)
+    for id, s in pairs(active_map) do
+      if not seen[id] then
         local timestamp = s.created_at and os.date("%m/%d/%Y %H:%M", s.created_at) or ""
         table.insert(entries, {
           id         = s.id,
@@ -62,6 +66,7 @@ function M.pick(config)
         })
       end
     end
+
     table.sort(entries, function(a, b)
       if a.status ~= b.status then return a.status == "active" end
       return (a.created_at or 0) > (b.created_at or 0)
