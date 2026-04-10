@@ -4,10 +4,29 @@ local M = {}
 
 -- Files to look for, in priority order
 M.context_files = {
-  ".neocode.md",    -- NeoCode-specific project instructions
-  "CLAUDE.md",      -- Claude Code conventions (reuse if exists)
-  ".cursorrules",   -- Cursor rules (reuse if exists)
-  ".github/copilot-instructions.md", -- GitHub Copilot instructions
+  -- NeoCode
+  ".neocode.md",
+  -- Claude Code
+  "CLAUDE.md",
+  ".claude/instructions.md",
+  -- Cursor
+  ".cursorrules",
+  ".cursor/rules/project.mdc",
+  -- GitHub Copilot
+  ".github/copilot-instructions.md",
+  -- Windsurf / Codeium
+  ".windsurfrules",
+  -- Cline
+  ".clinerules",
+  -- Aider
+  ".aider.conf.yml",
+  -- Codex
+  "AGENTS.md",
+  -- Gemini
+  "GEMINI.md",
+  -- Generic
+  ".ai-instructions.md",
+  "AI.md",
 }
 
 -- Read a file and return its content, or nil
