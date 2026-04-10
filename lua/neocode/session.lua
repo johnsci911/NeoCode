@@ -289,11 +289,25 @@ function M.resume_api(adapter, session_data, config)
   M._add(record)
   _current_id = record.id
 
-  -- Load saved messages
+  -- Load saved messages and clean up stale entries
   local history_dir = config.data_dir .. "/llama"
   local saved = llama_session_mod.load(history_dir, record.id)
   if #saved > 0 then
-    record.messages = saved
+    -- Filter out empty/broken messages from history
+    local clean = {}
+    for _, msg in ipairs(saved) do
+      -- Skip empty assistant messages (leftover from tool-call rounds)
+      if msg.role == "assistant" and (msg.content == nil or msg.content == "") and not msg.tool_calls then
+        goto skip_msg
+      end
+      -- Skip auto-continue "Continue." messages
+      if msg.role == "user" and msg.content == "Continue." then
+        goto skip_msg
+      end
+      table.insert(clean, msg)
+      ::skip_msg::
+    end
+    record.messages = clean
   end
 
   local buf = chat_buffer.create(record.messages)
