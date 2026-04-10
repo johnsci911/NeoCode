@@ -109,7 +109,7 @@ function M.stream(messages, bufnr, on_done, opts)
     local default_prompt = "You are a helpful assistant. Be concise and accurate. Do not repeat yourself. Do not output thinking tags like <think> or </think>."
     -- When tools are available, add project context and tool instructions
     if opts and opts.tools and #opts.tools > 0 then
-      local cwd = opts.cwd or vim.fn.getcwd()
+      local cwd = opts.cwd or require("neocode.context").find_project_root()
       local is_git = vim.fn.isdirectory(cwd .. "/.git") == 1
       local home = vim.fn.expand("~")
       local project_info = string.format("\n\nSystem: macOS, home directory: %s\nCurrent working directory: %s", home, cwd)

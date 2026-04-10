@@ -2,6 +2,40 @@
 -- Reads project context files to give the LLM understanding of the codebase.
 local M = {}
 
+-- Project root markers (searched upward from current buffer)
+local ROOT_MARKERS = {
+  ".git", ".neocode.md", "CLAUDE.md",
+  "package.json", "composer.json", "Cargo.toml", "go.mod",
+  "Gemfile", "pyproject.toml", "requirements.txt",
+  "pom.xml", "build.gradle", "mix.exs", "pubspec.yaml",
+  "CMakeLists.txt", "Makefile", "init.lua",
+}
+
+-- Find project root by searching upward from a starting directory.
+-- Returns the first directory containing a root marker, or cwd as fallback.
+function M.find_project_root()
+  -- Start from current buffer's directory
+  local buf_dir = vim.fn.expand("%:p:h")
+  if buf_dir == "" or buf_dir == "." then
+    buf_dir = vim.fn.getcwd()
+  end
+
+  local dir = buf_dir
+  local home = vim.fn.expand("~")
+  while dir and dir ~= "/" and dir ~= home do
+    for _, marker in ipairs(ROOT_MARKERS) do
+      local path = dir .. "/" .. marker
+      if vim.fn.filereadable(path) == 1 or vim.fn.isdirectory(path) == 1 then
+        return dir
+      end
+    end
+    dir = vim.fn.fnamemodify(dir, ":h")
+  end
+
+  -- Fallback to cwd
+  return vim.fn.getcwd()
+end
+
 -- Files to look for, in priority order
 M.context_files = {
   -- NeoCode

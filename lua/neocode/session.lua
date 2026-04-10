@@ -222,7 +222,7 @@ function M.create_api(adapter, title, config)
   record.messages = {}
   record.api_adapter = adapter
   record.pending_image_b64 = nil
-  record.cwd = vim.fn.getcwd()
+  record.cwd = require("neocode.context").find_project_root()
   M._add(record)
   _current_id = record.id
 
@@ -264,7 +264,7 @@ function M.resume_api(adapter, session_data, config)
   local record = M._new_record(adapter.name, session_data.title)
   record.id = session_data.id
   record.created_at = session_data.created_at
-  record.cwd = vim.fn.getcwd()
+  record.cwd = require("neocode.context").find_project_root()
   record.messages = {}
   record.api_adapter = adapter
   record.pending_image_b64 = nil
