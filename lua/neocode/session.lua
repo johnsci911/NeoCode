@@ -685,13 +685,19 @@ function M._open_api_input(record, config)
         local clean = (response_text or ""):gsub("<think>.-</think>", ""):gsub("</?tool_call>", ""):gsub("^%s+", ""):gsub("%s+$", "")
         local is_truncated = false
         if clean ~= "" and auto_continue_count < max_auto_continues then
-          -- Check for signs of truncation
-          local last_char = clean:sub(-1)
-          local ends_mid_sentence = not last_char:match("[%.%?!%)%]}\n]")
-          local very_short = #clean < 30 and not clean:match("[%.%?!]")
+          -- Check for signs of truncation (be conservative to avoid false positives)
+          local last_line = clean:match("[^\n]*$") or ""
           local has_unexecuted_tool = response_text:match("<tool_call>")
+            or response_text:match('%{"function":')
 
-          if ends_mid_sentence or very_short or has_unexecuted_tool then
+          -- Only auto-continue for clear truncation signs
+          if has_unexecuted_tool then
+            is_truncated = true
+          elseif #clean < 20 and not clean:match("[%.%?!]") then
+            -- Very short with no ending punctuation
+            is_truncated = true
+          elseif last_line:match("^%d+%.%s*$") or last_line:match("^%-%s*$") or last_line:match("^%*%s*$") then
+            -- Ends with an empty list item (numbered, bullet, or star)
             is_truncated = true
           end
         end

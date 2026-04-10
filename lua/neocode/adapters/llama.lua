@@ -193,8 +193,8 @@ function M.stream(messages, bufnr, on_done, opts)
 
   local full_response = {}
   local partial_line = ""
-  local repetition_window = 50
-  local repetition_threshold = 3
+  local repetition_window = 80
+  local repetition_threshold = 4
 
   -- Stats tracking
   local start_time = vim.uv.hrtime()
@@ -339,11 +339,12 @@ function M.stream(messages, bufnr, on_done, opts)
             end
 
             -- Degenerate output detection: check last 100 tokens for gibberish
-            if token_count > 100 and token_count % 50 == 0 then
+            if token_count > 200 and token_count % 100 == 0 then
               local window = math.min(100, #full_response)
               local recent = table.concat(full_response, "", #full_response - window + 1)
-              local alpha = recent:gsub("[^%a ]", "")
-              local ratio = #alpha / math.max(1, #recent)
+              -- Count meaningful chars (letters, digits, markdown-safe punctuation)
+              local meaningful = recent:gsub("[^%w%s%.%,%(%)%-%|%:%;%!%?%#%*%/]", "")
+              local ratio = #meaningful / math.max(1, #recent)
               if ratio < 0.3 then
                 vim.schedule(function()
                   pcall(vim.fn.jobstop, job_id)
