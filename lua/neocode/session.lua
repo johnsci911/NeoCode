@@ -281,8 +281,23 @@ function M.resume_api(adapter, session_data, config)
   local buf = chat_buffer.create(record.messages)
   record.bufnr = buf
 
-  vim.cmd("vsplit")
-  local win = vim.api.nvim_get_current_win()
+  -- Reuse existing NeoCode window if possible, otherwise vsplit
+  local win = nil
+  local current = M._current()
+  if current and current.winid and vim.api.nvim_win_is_valid(current.winid) then
+    win = current.winid
+  else
+    -- Check if current window is a NeoCode buffer
+    local cur_win = vim.api.nvim_get_current_win()
+    local cur_buf = vim.api.nvim_win_get_buf(cur_win)
+    if vim.bo[cur_buf].buftype == "nofile" then
+      win = cur_win
+    else
+      vim.cmd("vsplit")
+      win = vim.api.nvim_get_current_win()
+    end
+  end
+
   vim.api.nvim_win_set_buf(win, buf)
   record.winid = win
 
