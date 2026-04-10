@@ -130,16 +130,39 @@ function M.pick(config)
         end
       end)
 
-      -- d: delete session
+      -- d: delete session(s) - supports multi-select with <Tab>
       map("n", "d", function()
-        local entry = action_state.get_selected_entry()
-        if not entry then return end
-        local sel = entry.value
-        if sel.status == "active" then
-          vim.notify("neocode: close the session first before deleting", vim.log.levels.WARN)
-          return
+        local picker = action_state.get_current_picker(prompt_bufnr)
+        local selections = picker:get_multi_selection()
+
+        -- Fall back to single selection if no multi-select
+        if #selections == 0 then
+          local entry = action_state.get_selected_entry()
+          if entry then selections = { entry } end
         end
-        session.delete_from_disk(sel.id, config)
+
+        local deleted = 0
+        local skipped = 0
+        for _, entry in ipairs(selections) do
+          local sel = entry.value
+          if sel.status == "active" then
+            skipped = skipped + 1
+          else
+            session.delete_from_disk(sel.id, config)
+            -- Also delete the llama session messages file
+            local llama_session = require("neocode.llama_session")
+            local history_dir = config.data_dir .. "/llama"
+            llama_session.delete(history_dir, sel.id)
+            deleted = deleted + 1
+          end
+        end
+
+        if skipped > 0 then
+          vim.notify("neocode: skipped " .. skipped .. " active session(s) — close them first", vim.log.levels.WARN)
+        end
+        if deleted > 0 then
+          vim.notify("neocode: deleted " .. deleted .. " session(s)", vim.log.levels.INFO)
+        end
         refresh_picker(prompt_bufnr)
       end)
 
