@@ -585,11 +585,19 @@ function M.stream_with_tools(messages, bufnr, on_done, opts)
             consecutive_errors = 0
           end
 
-          -- Add tool result message
+          -- Add tool result message (truncate large results to prevent context overflow)
+          local content = result_text or ""
+          local max_result_len = 3000
+          if #content > max_result_len then
+            local line_count = select(2, content:gsub("\n", "\n"))
+            content = content:sub(1, max_result_len)
+              .. string.format("\n\n[truncated: showing first %d chars of %d, ~%d lines total]",
+                max_result_len, #result_text, line_count)
+          end
           table.insert(messages, {
             role = "tool",
             tool_call_id = tc.id,
-            content = result_text or "",
+            content = content,
           })
 
           if opts.on_tool_display then

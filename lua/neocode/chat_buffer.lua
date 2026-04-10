@@ -146,8 +146,9 @@ function M.render_lines(messages)
       table.insert(lines, "")
       local parts = {}
       if s.model then table.insert(parts, s.model) end
-      if s.completion_tokens and s.completion_tokens > 0 then
-        table.insert(parts, string.format("%d tokens", s.completion_tokens))
+      local tokens = s.completion_tokens or s.tokens or 0
+      if tokens > 0 then
+        table.insert(parts, string.format("%d tokens", tokens))
       end
       if s.thinking_time and s.thinking_time > 0.5 then
         table.insert(parts, string.format("💭 %.1fs", s.thinking_time))
