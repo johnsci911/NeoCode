@@ -247,7 +247,7 @@ function M.create_api(adapter, title, config)
   vim.wo[win].list = false
 
   M._register_api_keymaps(buf, record, config)
-  M._persist(config)
+  -- Don't persist yet -- wait until first message is sent (see do_stream auto-title)
 
   -- Load MCP permissions
   local ok_perms, mcp_perms = pcall(require, "neocode.mcp_permissions")
@@ -1109,7 +1109,10 @@ function M.close(config)
     s.status = "closed"
     s.bufnr = nil
     s.job_id = nil
-    M._persist(config)
+    -- Only persist if session had messages (don't save empty sessions)
+    if s.messages and #s.messages > 0 then
+      M._persist(config)
+    end
     M._remove(s.id)
   end
 
