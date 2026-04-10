@@ -181,12 +181,32 @@ function M.pick(config)
         end)
       end)
 
-      -- n: new session
+      -- n: new session (reuses existing NeoCode window)
       map("n", "n", function()
         actions.close(prompt_bufnr)
         local adapter = config.adapters and config.adapters[config.default_adapter]
-        if adapter then
-          session.create(adapter, nil, config)
+        if not adapter then return end
+
+        -- Find existing NeoCode window to reuse
+        local current = session._current()
+        local reuse_win = nil
+        if current and current.winid and vim.api.nvim_win_is_valid(current.winid) then
+          reuse_win = current.winid
+        end
+
+        session.create(adapter, nil, config)
+
+        -- Move new session buffer into existing window if we had one
+        if reuse_win then
+          local new = session._current()
+          if new and new.bufnr and vim.api.nvim_buf_is_valid(new.bufnr) then
+            -- Close the extra split that create() opened
+            if new.winid and new.winid ~= reuse_win and vim.api.nvim_win_is_valid(new.winid) then
+              vim.api.nvim_win_close(new.winid, true)
+            end
+            vim.api.nvim_win_set_buf(reuse_win, new.bufnr)
+            new.winid = reuse_win
+          end
         end
       end)
 
