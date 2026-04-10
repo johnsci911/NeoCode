@@ -22,25 +22,49 @@ function M.pick(config)
 
   local function build_entries()
     local all = session.load_all_from_disk(config)
-    local active_ids = {}
+    -- Merge active in-memory sessions (they may have updated titles)
+    local active_map = {}
     for _, s in ipairs(session._all()) do
-      active_ids[s.id] = true
+      active_map[s.id] = s
     end
     local entries = {}
+    local seen = {}
     for _, s in ipairs(all) do
-      local is_active = active_ids[s.id] or s.status == "active"
+      local is_active = active_map[s.id] ~= nil or s.status == "active"
+      -- Use in-memory title if available (may have been auto-titled or renamed)
+      local title = (active_map[s.id] and active_map[s.id].title) or s.title
+      local timestamp = ""
+      if s.created_at then
+        timestamp = os.date("%m/%d/%Y %H:%M", s.created_at)
+      end
+      seen[s.id] = true
       table.insert(entries, {
         id         = s.id,
         adapter    = s.adapter,
-        title      = s.title,
+        title      = title,
         status     = is_active and "active" or "closed",
         created_at = s.created_at,
-        display    = (is_active and "● " or "○ ") .. s.title .. "  [" .. s.adapter .. "]",
+        display    = string.format("%s %s  [%s]  %s",
+          is_active and "●" or "○", title, s.adapter, timestamp),
       })
+    end
+    -- Add active sessions not yet persisted to disk
+    for _, s in ipairs(session._all()) do
+      if not seen[s.id] then
+        local timestamp = s.created_at and os.date("%m/%d/%Y %H:%M", s.created_at) or ""
+        table.insert(entries, {
+          id         = s.id,
+          adapter    = s.adapter,
+          title      = s.title,
+          status     = "active",
+          created_at = s.created_at,
+          display    = string.format("● %s  [%s]  %s", s.title, s.adapter, timestamp),
+        })
+      end
     end
     table.sort(entries, function(a, b)
       if a.status ~= b.status then return a.status == "active" end
-      return a.created_at > b.created_at
+      return (a.created_at or 0) > (b.created_at or 0)
     end)
     return entries
   end
