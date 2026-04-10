@@ -193,8 +193,6 @@ function M.stream(messages, bufnr, on_done, opts)
 
   local full_response = {}
   local partial_line = ""
-  local repetition_window = 80
-  local repetition_threshold = 4
 
   -- Stats tracking
   local start_time = vim.uv.hrtime()
@@ -308,37 +306,8 @@ function M.stream(messages, bufnr, on_done, opts)
               context_size = cfg.context_size or 32768,
             }
 
-            -- Repetition detection
-            if #full_response >= repetition_window then
-              local recent = table.concat(full_response, "", #full_response - repetition_window + 1)
-              local len = #recent
-              for plen = 10, math.floor(len / repetition_threshold) do
-                local pattern = recent:sub(1, plen)
-                local count = 0
-                for i = 1, len - plen + 1, plen do
-                  if recent:sub(i, i + plen - 1) == pattern then
-                    count = count + 1
-                  else
-                    break
-                  end
-                end
-                if count >= repetition_threshold then
-                  vim.schedule(function()
-                    pcall(vim.fn.jobstop, job_id)
-                    if not vim.api.nvim_buf_is_valid(bufnr) then return end
-                    vim.bo[bufnr].modifiable = true
-                    local lc = vim.api.nvim_buf_line_count(bufnr)
-                    vim.api.nvim_buf_set_lines(bufnr, lc, lc, false,
-                      { "", "--- [stopped: repetition detected] ---" })
-                    vim.bo[bufnr].modifiable = false
-                    vim.notify("neocode: stopped — repetitive output detected", vim.log.levels.WARN)
-                  end)
-                  return
-                end
-              end
-            end
-
-            -- Degenerate output detection: check last 100 tokens for gibberish
+            -- Degenerate output detection: check for gibberish (replaces old repetition detector
+            -- which false-triggered on ASCII art, tables, and markdown formatting)
             if token_count > 200 and token_count % 100 == 0 then
               local window = math.min(100, #full_response)
               local recent = table.concat(full_response, "", #full_response - window + 1)
