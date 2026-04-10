@@ -130,9 +130,24 @@ function M.stream(messages, bufnr, on_done, opts)
         project_info = project_info .. "\nTop-level files: " .. table.concat(names, ", ")
       end
 
-      default_prompt = default_prompt .. project_info
-        .. "\n\nYou have access to tools. When the user asks you to do something that requires reading files, searching, listing directories, or any task a tool can handle, you MUST call the appropriate tool using the function calling format. Do NOT describe what you would do -- actually call the tool. Always use tools when they can help answer the user's question."
-        .. "\nWhen accessing files, use absolute paths based on the working directory above."
+      -- List available tools explicitly in the prompt (some models ignore the tools API param)
+      local tool_names = {}
+      for _, t in ipairs(opts.tools) do
+        local fn = t["function"] or t
+        if fn.name then
+          table.insert(tool_names, fn.name .. ": " .. (fn.description or ""):sub(1, 80))
+        end
+        if #tool_names >= 10 then break end
+      end
+      local tools_list = ""
+      if #tool_names > 0 then
+        tools_list = "\n\nAvailable tools:\n- " .. table.concat(tool_names, "\n- ")
+      end
+
+      default_prompt = default_prompt .. project_info .. tools_list
+        .. "\n\nIMPORTANT: You have direct access to the user's filesystem and project files through the tools listed above. You CAN read files, list directories, search code, and execute commands. Do NOT tell the user you cannot access their files. Do NOT ask users to paste code or share URLs. Instead, USE the tools to read their files directly."
+        .. "\nWhen the user asks about their code or project, IMMEDIATELY call the appropriate tool (like read_file or list_directory) using the function calling format."
+        .. "\nAlways use absolute paths based on the working directory: " .. cwd
 
       -- Inject project context files (.neocode.md, CLAUDE.md, README.md, etc.)
       local ok_ctx, context = pcall(require, "neocode.context")
