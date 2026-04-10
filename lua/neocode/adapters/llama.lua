@@ -127,6 +127,15 @@ function M.stream(messages, bufnr, on_done, opts)
       default_prompt = default_prompt .. project_info
         .. "\n\nYou have access to tools. When the user asks you to do something that requires reading files, searching, listing directories, or any task a tool can handle, you MUST call the appropriate tool using the function calling format. Do NOT describe what you would do -- actually call the tool. Always use tools when they can help answer the user's question."
         .. "\nWhen accessing files, use absolute paths based on the working directory above."
+
+      -- Inject project context files (.neocode.md, CLAUDE.md, README.md, etc.)
+      local ok_ctx, context = pcall(require, "neocode.context")
+      if ok_ctx then
+        local project_context = context.gather(cwd)
+        if project_context then
+          default_prompt = default_prompt .. "\n\n" .. project_context
+        end
+      end
     end
     table.insert(filtered, 1, {
       role = "system",
