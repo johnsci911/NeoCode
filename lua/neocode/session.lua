@@ -730,14 +730,22 @@ function M._open_api_input(record, config)
           local has_unexecuted_tool = response_text:match("<tool_call>")
             or response_text:match('%{"function":')
 
+          -- Check if this response came after tool calls (model should analyze results)
+          local had_tool_calls = false
+          for i = #record.messages, 1, -1 do
+            if record.messages[i].role == "tool" then had_tool_calls = true; break end
+            if record.messages[i].role == "user" then break end
+          end
+
           -- Only auto-continue for clear truncation signs
           if has_unexecuted_tool then
             is_truncated = true
           elseif #clean < 20 and not clean:match("[%.%?!]") then
-            -- Very short with no ending punctuation
+            is_truncated = true
+          elseif had_tool_calls and #clean < 100 then
+            -- Model got tool results but barely responded -- needs to continue
             is_truncated = true
           elseif last_line:match("^%d+%.%s*$") or last_line:match("^%-%s*$") or last_line:match("^%*%s*$") then
-            -- Ends with an empty list item (numbered, bullet, or star)
             is_truncated = true
           end
         end
