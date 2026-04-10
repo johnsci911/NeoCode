@@ -65,11 +65,12 @@ llama-server --hf-repo <model-repo> -ngl 99 -c 32768 --host 0.0.0.0 --port 8080
 llama-server \
   --hf-repo Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF \
   --hf-file Qwen3.5-9B.Q8_0.gguf \
+  --mmproj ~/llama.cpp/models/mmproj-BF16.gguf \
   -ngl 99 -c 32768 --host 0.0.0.0 --port 8080 \
   --temp 0.6 --top-p 0.85 --top-k 30 --min-p 0.05 --repeat-penalty 1.1
 ```
 
-> This model has vision built-in -- no separate `--mmproj` needed.
+> Download the mmproj separately: `hf download Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF mmproj-BF16.gguf --local-dir ~/llama.cpp/models/`
 
 #### AMD GPU (Vulkan) note
 
