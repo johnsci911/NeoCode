@@ -46,8 +46,9 @@ function M.render_lines(messages)
     -- Render text content (with thinking blocks as blockquotes)
     if type(msg.content) == "string" and msg.content ~= "" then
       local content = msg.content
-      -- Strip <tool_call> tags (model sometimes outputs these as text)
+      -- Strip tool call artifacts (model sometimes outputs these as text)
       content = content:gsub("</?tool_call>", "")
+      content = content:gsub('%{"function":%s*".-"%s*,%s*"arguments":%s*%b{}%s*%}', "")
       -- Render <think> blocks as blockquotes
       content = content:gsub("<think>", "\n*thinking...*\n")
       content = content:gsub("</think>", "\n\n")

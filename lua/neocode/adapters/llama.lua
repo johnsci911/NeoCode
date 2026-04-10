@@ -438,9 +438,32 @@ function M.stream(messages, bufnr, on_done, opts)
             end
           end
 
+          -- Also detect bare JSON tool calls: {"function": "name", "arguments": {...}}
+          if #parsed_tool_calls == 0 then
+            for json_tc in text:gmatch('%{"function":%s*".-"%s*,%s*"arguments":%s*%b{}%s*%}') do
+              local tc_ok, tc_data = pcall(vim.fn.json_decode, json_tc)
+              if tc_ok and type(tc_data) == "table" then
+                local tc_name = tc_data["function"] or tc_data.name
+                local tc_args = tc_data.arguments or {}
+                if tc_name then
+                  table.insert(parsed_tool_calls, {
+                    id = "json_call_" .. #parsed_tool_calls + 1,
+                    type = "function",
+                    ["function"] = {
+                      name = tc_name,
+                      arguments = type(tc_args) == "string" and tc_args or vim.fn.json_encode(tc_args),
+                    },
+                  })
+                end
+              end
+            end
+          end
+
           if #parsed_tool_calls > 0 then
-            -- Strip tool_call tags from text before passing
-            local clean_text = text:gsub("<tool_call>.-</tool_call>", ""):gsub("^%s+", ""):gsub("%s+$", "")
+            -- Strip tool call text before passing
+            local clean_text = text:gsub("<tool_call>.-</tool_call>", "")
+            clean_text = clean_text:gsub('%{"function":%s*".-"%s*,%s*"arguments":%s*%b{}%s*%}', "")
+            clean_text = clean_text:gsub("^%s+", ""):gsub("%s+$", "")
             if on_done then on_done(clean_text, stats, parsed_tool_calls) end
           else
             if on_done then on_done(text, stats, nil) end
