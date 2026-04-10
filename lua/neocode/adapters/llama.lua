@@ -49,7 +49,13 @@ function M.stream(messages, bufnr, on_done, opts)
 
   -- Auto-detect model from server unless user explicitly configured one
   if not M._user_configured_model then
-    cfg.model = M._detect_model(cfg.base_url) or cfg.model or "unknown"
+    local detected = M._detect_model(cfg.base_url)
+    if detected then
+      cfg.model = detected
+    elseif not cfg.model then
+      cfg.model = "unknown"
+      vim.notify("neocode: cannot reach llama-server at " .. cfg.base_url .. " — is it running?", vim.log.levels.WARN)
+    end
   end
 
   local url = cfg.base_url .. "/v1/chat/completions"
@@ -396,6 +402,33 @@ function M.stream(messages, bufnr, on_done, opts)
     on_exit = function(_, exit_code, _)
       vim.schedule(function()
         M._live_stats = nil
+
+        -- Detect connection failure
+        if exit_code ~= 0 and token_count == 0 then
+          local error_msg = "neocode: connection to llama-server failed"
+          if exit_code == 7 then
+            error_msg = "neocode: llama-server not running (connection refused)"
+          elseif exit_code == 28 then
+            error_msg = "neocode: llama-server timed out"
+          elseif exit_code == 52 then
+            error_msg = "neocode: llama-server returned empty response"
+          end
+          vim.notify(error_msg .. " (exit code: " .. exit_code .. ")", vim.log.levels.ERROR)
+
+          if vim.api.nvim_buf_is_valid(bufnr) then
+            vim.bo[bufnr].modifiable = true
+            local lc = vim.api.nvim_buf_line_count(bufnr)
+            vim.api.nvim_buf_set_lines(bufnr, lc - 1, lc, false, {
+              "⚠️ " .. error_msg,
+              "Make sure llama-server is running at: " .. cfg.base_url,
+            })
+            vim.bo[bufnr].modifiable = false
+          end
+
+          if on_done then on_done("", {}, nil) end
+          return
+        end
+
         local text = table.concat(full_response)
         local elapsed_ns = vim.uv.hrtime() - start_time
         local elapsed_s = elapsed_ns / 1e9
