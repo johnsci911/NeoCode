@@ -348,6 +348,14 @@ function M.resume_api(adapter, session_data, config)
   local total = vim.api.nvim_buf_line_count(buf)
   vim.api.nvim_win_set_cursor(win, { total, 0 })
 
+  -- Re-trigger markdown rendering after buffer is displayed
+  vim.schedule(function()
+    if vim.api.nvim_buf_is_valid(buf) then
+      vim.bo[buf].filetype = "markdown"
+      pcall(function() require("render-markdown").buf_attach(buf) end)
+    end
+  end)
+
   local ok_perms, mcp_perms = pcall(require, "neocode.mcp_permissions")
   if ok_perms then
     mcp_perms.load(config)
