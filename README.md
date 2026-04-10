@@ -70,6 +70,26 @@ llama-server \
   -fa on --temp 0.6 --top-p 0.85 --top-k 30 --min-p 0.05 --repeat-penalty 1.1
 ```
 
+#### AMD GPU (Vulkan) note
+
+If you're on AMD with Vulkan (e.g. RX 6900 XT via MoltenVK on macOS), use llama.cpp build **b6241** for stable Vulkan support. Newer builds may have Vulkan regressions.
+
+```bash
+cd llama.cpp
+git checkout b6241
+cmake -B build && cmake --build build --config Release
+```
+
+#### Other recommended models
+
+| Model | Size | VRAM | Vision | Tool Calling | Notes |
+|-------|------|------|--------|-------------|-------|
+| Qwen3.5-9B-Claude-Distilled (Q8) | 9B | ~9GB | Yes | Generic | Tested, works with vision |
+| Qwen3-14B | 14B | ~9GB (Q4) | No | Native | Strong coding + tools |
+| Qwen3-Coder-30B-A3B (MoE) | 30B/3B active | ~14GB (Q3) | No | Native | Best coder, needs `--jinja` + newer build |
+| Qwen3-VL-8B-Thinking | 8B | ~7GB (Q4) | Yes | Generic | Best vision + thinking |
+| Devstral Vision Small 2507 | 24B | ~14GB (Q4) | Yes | Yes | Coding + vision + tools, tight fit |
+
 ### With MCP Tools (mcphub.nvim)
 
 Add [mcphub.nvim](https://github.com/ravitemer/mcphub.nvim) to your plugins and NeoCode auto-detects it:
