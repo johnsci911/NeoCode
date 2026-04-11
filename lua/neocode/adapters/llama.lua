@@ -148,6 +148,7 @@ function M.stream(messages, bufnr, on_done, opts)
         .. "\n\nIMPORTANT: You have direct access to the user's filesystem and project files through the tools listed above. You CAN read files, list directories, search code, and execute commands. Do NOT tell the user you cannot access their files. Do NOT ask users to paste code or share URLs. Instead, USE the tools to read their files directly."
         .. "\nWhen the user asks about their code or project, IMMEDIATELY call the appropriate tool (like read_file or list_directory) using the function calling format."
         .. "\nAlways use absolute paths based on the working directory: " .. cwd
+        .. "\nBe EFFICIENT with tool calls: read only key files (config, entry points, routes), not every file. Use search_files to find specific patterns instead of reading files one by one. Summarize as you go."
 
       -- Inject project context files (.neocode.md, CLAUDE.md, README.md, etc.)
       local ok_ctx, context = pcall(require, "neocode.context")
