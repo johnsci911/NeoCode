@@ -59,7 +59,21 @@ Start llama-server:
 llama-server --hf-repo <model-repo> -ngl 99 -c 32768 --host 0.0.0.0 --port 8080
 ```
 
-#### Tested model
+#### Tested model — agentic tool calling (recommended, no vision)
+
+```bash
+llama-server \
+  --hf-repo unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF \
+  --hf-file Qwen3-Coder-30B-A3B-Instruct-UD-Q3_K_XL.gguf \
+  -ngl 99 -c 32768 -ctk q8_0 -ctv q8_0 \
+  --host 0.0.0.0 --port 8080 -fa on --jinja -np 1
+```
+
+Fits 16GB VRAM at Q3_K_XL (~13 GB) with KV cache quantized to Q8 (~1.6 GB at 32k context). MoE with only 3B params active per token, so decode stays fast even on AMD Vulkan / MoltenVK. Native tool calling via Qwen3-Coder's jinja template — no Hermes 2 Pro fallback, KV cache reuses cleanly across agentic tool-loop rounds. Text-only: no vision support.
+
+If `-c 32768` pressures your system (16GB VRAM is tight), drop to `-c 16384` or add `--cpu-moe` to offload experts to system RAM.
+
+#### Tested model — with vision
 
 ```bash
 llama-server \
@@ -71,6 +85,8 @@ llama-server \
 ```
 
 > Download the mmproj separately: `hf download Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF mmproj-BF16.gguf --local-dir ~/llama.cpp/models/`
+>
+> Note: this is a hybrid SSM/attention architecture, so KV cache truncation fails between agentic tool-loop rounds, making multi-round tool use much slower. Prefer the Qwen3-Coder model above for codebase review / tool-heavy tasks, and switch to this one only when you need vision.
 
 #### AMD GPU (Vulkan) note
 
@@ -86,9 +102,9 @@ cmake -B build && cmake --build build --config Release
 
 | Model | Size | VRAM | Vision | Tool Calling | Notes |
 |-------|------|------|--------|-------------|-------|
-| Qwen3.5-9B-Claude-Distilled (Q8) | 9B | ~9GB | Yes | Generic | Tested, works with vision |
+| **Qwen3-Coder-30B-A3B (MoE)** | 30B/3B active | ~14GB (Q3) | No | Native | **Tested, recommended for agentic tool calling** |
+| Qwen3.5-9B-Claude-Distilled (Q8) | 9B | ~9GB | Yes | Generic | Tested, works with vision (hybrid SSM, slower for tool loops) |
 | Qwen3-14B | 14B | ~9GB (Q4) | No | Native | Strong coding + tools |
-| Qwen3-Coder-30B-A3B (MoE) | 30B/3B active | ~14GB (Q3) | No | Native | Best coder, needs `--jinja` + newer build |
 | Qwen3-VL-8B-Thinking | 8B | ~7GB (Q4) | Yes | Generic | Best vision + thinking |
 | Devstral Vision Small 2507 | 24B | ~14GB (Q4) | Yes | Yes | Coding + vision + tools, tight fit |
 
