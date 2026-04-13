@@ -208,6 +208,42 @@ function M.stream(messages, bufnr, on_done, opts)
   -- Callback to notify phase changes (thinking → generating)
   local on_phase_change = M._on_phase_change
 
+  -- Poll llama-server /slots endpoint for real prefill progress so the
+  -- "Thinking..." spinner can show "53% (4096/7748)" instead of just elapsed
+  -- seconds. Starts with the request, stops when the first content token
+  -- arrives (or the stream ends). Falls back silently if /slots is disabled
+  -- (older builds or servers launched with --no-slots).
+  M._prefill_progress = nil
+  local poll_timer = vim.uv.new_timer()
+  poll_timer:start(150, 500, vim.schedule_wrap(function()
+    if first_token_time ~= nil then
+      pcall(function() poll_timer:stop(); poll_timer:close() end)
+      M._prefill_progress = nil
+      return
+    end
+    vim.fn.jobstart({ "curl", "--silent", "--max-time", "1", cfg.base_url .. "/slots" }, {
+      stdout_buffered = true,
+      on_stdout = function(_, data)
+        if first_token_time ~= nil then return end
+        local body = table.concat(data or {}, "\n")
+        if body == "" then return end
+        local ok, slots = pcall(vim.fn.json_decode, body)
+        if not ok or type(slots) ~= "table" or not slots[1] then return end
+        local slot = slots[1]
+        if slot.is_processing == false then return end
+        local n_total = slot.n_prompt_tokens or slot.prompt_n or 0
+        local n_done  = slot.n_prompt_tokens_processed or slot.n_past or 0
+        if n_total > 0 and n_done >= 0 then
+          M._prefill_progress = {
+            n_done  = n_done,
+            n_total = n_total,
+            pct     = math.min(1.0, n_done / n_total),
+          }
+        end
+      end,
+    })
+  end))
+
   local job_id = vim.fn.jobstart({
     "curl", "--silent", "--no-buffer",
     "-X", "POST", url,
@@ -388,6 +424,13 @@ function M.stream(messages, bufnr, on_done, opts)
     on_exit = function(_, exit_code, _)
       vim.schedule(function()
         M._live_stats = nil
+        M._prefill_progress = nil
+        pcall(function()
+          if poll_timer and not poll_timer:is_closing() then
+            poll_timer:stop()
+            poll_timer:close()
+          end
+        end)
 
         -- Detect connection failure
         if exit_code ~= 0 and token_count == 0 then

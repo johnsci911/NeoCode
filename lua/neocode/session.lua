@@ -656,13 +656,21 @@ function M._open_api_input(record, config)
             end
             label = string.format("%s %s %s... %.1fs", spinner_frames[spinner_idx], tool_icon, tool_label, elapsed)
           elseif spinner_phase == "thinking" then
-            -- Show live stats during thinking too
-            local live = llama._live_stats
+            -- Prefer real prefill progress from llama-server /slots polling;
+            -- fall back to live decode stats (rare — only fires if the model
+            -- emits content *inside* a <think> block before we flip phase).
             local extra = ""
-            if live and live.token_count and live.token_count > 0 then
-              extra = string.format(" · %d tokens", live.token_count)
-              if live.tps and live.tps > 0 then
-                extra = extra .. string.format(" · %.1f t/s", live.tps)
+            local prog = llama._prefill_progress
+            if prog and prog.pct and prog.n_total > 0 then
+              extra = string.format(" · %d%% (%d/%d)",
+                math.floor(prog.pct * 100 + 0.5), prog.n_done, prog.n_total)
+            else
+              local live = llama._live_stats
+              if live and live.token_count and live.token_count > 0 then
+                extra = string.format(" · %d tokens", live.token_count)
+                if live.tps and live.tps > 0 then
+                  extra = extra .. string.format(" · %.1f t/s", live.tps)
+                end
               end
             end
             label = string.format("%s 💭 Thinking... %.1fs%s", spinner_frames[spinner_idx], elapsed, extra)
