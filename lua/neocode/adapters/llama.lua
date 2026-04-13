@@ -62,9 +62,7 @@ function M.stream(messages, bufnr, on_done, opts)
 
   -- Filter messages: strip think blocks from history, remove empty assistants
   local filtered = {}
-  local has_system = false
   for _, msg in ipairs(messages) do
-    if msg.role == "system" then has_system = true end
     if msg.role == "assistant" and (msg.content == nil or msg.content == "") then
       goto skip
     end
@@ -104,9 +102,28 @@ function M.stream(messages, bufnr, on_done, opts)
     filtered = trimmed
   end
 
-  -- Add system prompt if none exists to reduce hallucination
-  if not has_system and cfg.system_prompt ~= false then
-    local default_prompt = "You are a helpful assistant. Be concise and accurate. Do not repeat yourself. Do not output thinking tags like <think> or </think>."
+  -- Always inject our default system prompt unless the user explicitly
+  -- disabled it. Previously this was gated on `not has_system`, which caused
+  -- the web-search path (session.lua:978 injects a system message with
+  -- results) to silently strip our identity + capability prompt, leading
+  -- Qwen3-Coder to fall back to generic refusals ("I can't browse the
+  -- internet", "my knowledge cutoff is April 2024", fake citations). Multiple
+  -- system messages are valid — chat templates concatenate them, so our
+  -- prompt and any web-search context coexist cleanly.
+  if cfg.system_prompt ~= false then
+    local default_prompt = table.concat({
+      "You are a local AI assistant running via llama.cpp inside NeoCode (a Neovim plugin). You operate entirely on the user's machine.",
+      "",
+      "Capabilities that may be present in this conversation:",
+      "- MCP tools: if an \"Available tools\" list appears later in this system prompt, you CAN read files, list directories, search code, and run commands on the user's filesystem using those tools. Call them directly — do not ask the user to paste file contents.",
+      "- Web search results: if a system message containing live web search results appears in your context, use it as current authoritative information and answer from it.",
+      "",
+      "Do NOT claim you \"cannot browse the internet\", \"cannot access files\", or \"have a knowledge cutoff of [date]\" — in this environment those statements are false. Do not invent or roleplay as a different AI. Do not fabricate citations like [1][2][3] — if you reference search results, quote or summarize the actual content in your context.",
+      "",
+      "If the user asks whether you searched the web or read their files, answer based on what is actually present in your context right now, not on a generic training-era disclaimer.",
+      "",
+      "Be concise and accurate. Do not repeat yourself. Do not output <think> or </think> tags in your final response.",
+    }, "\n")
     -- When tools are available, add project context and tool instructions
     if opts and opts.tools and #opts.tools > 0 then
       local cwd = opts.cwd or require("neocode.context").find_project_root()
