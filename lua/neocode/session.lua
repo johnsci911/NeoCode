@@ -243,11 +243,22 @@ function M.create_api(adapter, title, config)
   vim.wo[win].wrap = true
   vim.wo[win].linebreak = true
   vim.wo[win].conceallevel = 2
+  vim.wo[win].concealcursor = "nc"
   vim.wo[win].winbar = config.winbar or ""
   vim.wo[win].list = false
 
   M._register_api_keymaps(buf, record, config)
   -- Don't persist yet -- wait until first message is sent (see do_stream auto-title)
+
+  -- Attach render-markdown.nvim (optional dep) so headings, bold, code fences,
+  -- and tables render with conceal/highlights instead of raw syntax. Resume
+  -- path does this too — keep them in sync.
+  vim.schedule(function()
+    if vim.api.nvim_buf_is_valid(buf) then
+      vim.bo[buf].filetype = "markdown"
+      pcall(function() require("render-markdown").buf_attach(buf) end)
+    end
+  end)
 
   -- Load MCP permissions
   local ok_perms, mcp_perms = pcall(require, "neocode.mcp_permissions")
@@ -336,6 +347,7 @@ function M.resume_api(adapter, session_data, config)
   vim.wo[win].wrap = true
   vim.wo[win].linebreak = true
   vim.wo[win].conceallevel = 2
+  vim.wo[win].concealcursor = "nc"
   vim.wo[win].winbar = config.winbar or ""
   vim.wo[win].list = false
 
