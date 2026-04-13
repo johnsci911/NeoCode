@@ -588,6 +588,21 @@ function M._open_api_input(record, config)
       return
     end
 
+    -- Age any existing web-search system messages and drop stale ones.
+    -- Web search results are only relevant to the turn that requested them
+    -- plus one follow-up turn; anything older is dead context that burns
+    -- prefill time every round. Messages are tagged with _is_web_search and
+    -- _age when injected in the search callback below.
+    for i = #record.messages, 1, -1 do
+      local msg = record.messages[i]
+      if msg.role == "system" and msg._is_web_search then
+        msg._age = (msg._age or 0) + 1
+        if msg._age >= 2 then
+          table.remove(record.messages, i)
+        end
+      end
+    end
+
     local web_search = require("neocode.web_search")
 
     local web_search_active = false
@@ -968,14 +983,21 @@ function M._open_api_input(record, config)
         vim.bo[record.bufnr].modifiable = false
 
         if results then
-          -- Remove previous web search system messages to save context
+          -- Remove any previous web-search system messages (including stale
+          -- ones the age prune missed) before injecting the new one.
           for i = #record.messages, 1, -1 do
-            if record.messages[i].role == "system" and record.messages[i].content:match("web search results") then
+            local m = record.messages[i]
+            if m.role == "system" and (m._is_web_search or (m.content or ""):match("web search results")) then
               table.remove(record.messages, i)
             end
           end
           local ctx = web_search.format_context(query, results)
-          table.insert(record.messages, { role = "system", content = ctx })
+          table.insert(record.messages, {
+            role = "system",
+            content = ctx,
+            _is_web_search = true,
+            _age = 0,
+          })
           -- Show search indicator in chat
           vim.bo[record.bufnr].modifiable = true
           local total = vim.api.nvim_buf_line_count(record.bufnr)
