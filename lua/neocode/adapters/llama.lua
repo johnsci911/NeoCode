@@ -510,21 +510,19 @@ end
 -- opts.tools: array of OpenAI tool schemas
 -- opts.on_tool_call: function(tool_call, callback) -- callback(result_text, is_error)
 -- opts.on_tool_display: function(tool_call, status) -- update chat buffer display
--- opts.max_rounds: max tool call rounds (default 20)
+--
+-- No hard round cap: the loop continues until the model produces a final text
+-- answer. Safety net is max_consecutive_errors (3 back-to-back tool failures),
+-- which prevents runaway loops from broken tools without cutting off a
+-- legitimately long codebase exploration.
 function M.stream_with_tools(messages, bufnr, on_done, opts)
   opts = opts or {}
-  local max_rounds = opts.max_rounds or 10
   local round = 0
   local consecutive_errors = 0
   local max_consecutive_errors = 3
 
   local function do_round()
     round = round + 1
-    if round > max_rounds then
-      vim.notify("neocode: max tool call rounds reached (" .. max_rounds .. ")", vim.log.levels.WARN)
-      if on_done then on_done("", {}, nil) end
-      return
-    end
 
     return M.stream(messages, bufnr, function(response_text, stats, tool_calls)
       if not tool_calls or #tool_calls == 0 then
