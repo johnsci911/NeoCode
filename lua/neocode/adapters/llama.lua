@@ -228,22 +228,35 @@ function M.stream(messages, bufnr, on_done, opts)
   -- Poll llama-server /slots endpoint for real prefill progress so the
   -- "Thinking..." spinner can show "53% (4096/7748)" instead of just elapsed
   -- seconds. Starts with the request, stops when the first content token
-  -- arrives (or the stream ends). Falls back silently if /slots is disabled
-  -- (older builds or servers launched with --no-slots).
+  -- arrives (or the stream ends). Falls back silently if /slots is disabled.
+  --
+  -- IMPORTANT: /slots queries serialize behind chat-completion tasks in
+  -- llama-server's single task queue, so aggressive polling during a long
+  -- prefill generates massive "stop: cancel task" storms in the server log
+  -- plus CPU overhead from curl subprocess spawns. We:
+  --   1. Delay the first poll by 3s — skips polling entirely for fast
+  --      prefills (the common case with warm KV cache).
+  --   2. Poll every 3s instead of 500ms — 6x less server contention.
+  --   3. Use --max-time 5 so the server has room to respond between tasks.
+  --   4. Back off entirely after 2 consecutive failures to avoid flooding
+  --      when /slots is disabled or the server is stuck.
   M._prefill_progress = nil
   local poll_timer = vim.uv.new_timer()
-  poll_timer:start(150, 500, vim.schedule_wrap(function()
-    if first_token_time ~= nil then
+  local poll_failures = 0
+  poll_timer:start(3000, 3000, vim.schedule_wrap(function()
+    if first_token_time ~= nil or poll_failures >= 2 then
       pcall(function() poll_timer:stop(); poll_timer:close() end)
       M._prefill_progress = nil
       return
     end
-    vim.fn.jobstart({ "curl", "--silent", "--max-time", "1", cfg.base_url .. "/slots" }, {
+    local got_response = false
+    vim.fn.jobstart({ "curl", "--silent", "--max-time", "5", cfg.base_url .. "/slots" }, {
       stdout_buffered = true,
       on_stdout = function(_, data)
         if first_token_time ~= nil then return end
         local body = table.concat(data or {}, "\n")
         if body == "" then return end
+        got_response = true
         local ok, slots = pcall(vim.fn.json_decode, body)
         if not ok or type(slots) ~= "table" or not slots[1] then return end
         local slot = slots[1]
@@ -256,6 +269,13 @@ function M.stream(messages, bufnr, on_done, opts)
             n_total = n_total,
             pct     = math.min(1.0, n_done / n_total),
           }
+        end
+      end,
+      on_exit = function(_, code)
+        if code ~= 0 or not got_response then
+          poll_failures = poll_failures + 1
+        else
+          poll_failures = 0
         end
       end,
     })
