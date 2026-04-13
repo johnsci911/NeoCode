@@ -6,6 +6,19 @@ local function safe_name(s)
   return (s or ""):gsub("[^%w]", "_")
 end
 
+-- Ensure an empty table JSON-encodes as {} (dict) not [] (array).
+-- Lua cannot distinguish empty array from empty dict, so vim.fn.json_encode({})
+-- emits []. Qwen3-Coder's jinja chat template iterates tool.parameters.properties
+-- with the |items filter, which crashes minja with "Unknown filter 'items' for
+-- type Array" when properties is empty. vim.empty_dict() tags the table so the
+-- encoder emits {} instead.
+local function ensure_dict(t)
+  if type(t) == "table" and next(t) == nil then
+    return vim.empty_dict()
+  end
+  return t
+end
+
 -- Check if mcphub is installed and hub is ready.
 function M.available()
   local ok, mcphub = pcall(require, "mcphub")
@@ -23,16 +36,22 @@ end
 
 -- Format one MCP tool as an OpenAI function-calling schema.
 function M._format_tool_schema(tool)
+  local params = tool.inputSchema or {
+    type = "object",
+    properties = vim.empty_dict(),
+    required = {},
+  }
+  -- Normalize empty properties (from mcphub schemas or our fallback) so jinja
+  -- templates that iterate with |items don't crash on a JSON array.
+  if type(params) == "table" then
+    params.properties = ensure_dict(params.properties)
+  end
   return {
     type = "function",
     ["function"] = {
       name = safe_name(tool.server_name) .. "__" .. safe_name(tool.name),
       description = tool.description or tool.name,
-      parameters = tool.inputSchema or {
-        type = "object",
-        properties = {},
-        required = {},
-      },
+      parameters = params,
     },
   }
 end
@@ -52,7 +71,7 @@ function M._format_resource_schema(resource)
       ),
       parameters = {
         type = "object",
-        properties = {},
+        properties = vim.empty_dict(),
         required = {},
       },
     },
@@ -86,7 +105,7 @@ function M._format_prompt_schema(prompt)
       ),
       parameters = {
         type = "object",
-        properties = props,
+        properties = ensure_dict(props),
         required = required,
       },
     },
