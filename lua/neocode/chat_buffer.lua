@@ -7,6 +7,46 @@ local ROLE_HEADERS = {
   system = "### System",
 }
 
+-- Detect unified-diff content in a tool result preview and strip the verbose
+-- header lines (Index:/===/---/+++) so we render just the hunks. The MCP
+-- filesystem server's edit_file returns diffs, and we want them shown inline
+-- with ```diff ``` fences so render-markdown.nvim highlights the +/- lines
+-- instead of burying them under a 2-space indent.
+--
+-- Returns (is_diff, body) — body is the content to render (without the
+-- original ```diff fence if present, and with header lines stripped).
+local function normalize_diff_preview(preview)
+  -- Strip an existing ```diff``` or ```patch``` fence if the MCP server added one
+  local stripped = preview
+  local had_fence = preview:match("^```diff") or preview:match("^```patch")
+  if had_fence then
+    stripped = preview:gsub("^```%w*\r?\n", ""):gsub("\n```%s*$", "")
+  end
+
+  -- Detect unified diff markers
+  local is_diff = had_fence
+    or stripped:match("^diff %-%-git")
+    or (stripped:match("%-%-%- ") and stripped:match("%+%+%+ ") and stripped:match("@@ "))
+
+  if not is_diff then
+    return false, preview
+  end
+
+  -- Keep everything from the first @@ hunk onward; drop Index/===/---/+++
+  -- noise that duplicates the file path already shown in the tool header.
+  local hunks = {}
+  local in_hunk = false
+  for line in (stripped .. "\n"):gmatch("([^\n]*)\n") do
+    if line:match("^@@") then in_hunk = true end
+    if in_hunk then table.insert(hunks, line) end
+  end
+
+  if #hunks == 0 then
+    return true, stripped  -- diff detected but no hunks parsed — show as-is
+  end
+  return true, table.concat(hunks, "\n")
+end
+
 -- Convert a messages array into lines of markdown text.
 function M.render_lines(messages)
   if #messages == 0 then return {} end
@@ -117,22 +157,38 @@ function M.render_lines(messages)
           table.insert(lines, string.format("%s **%s**%s", icon, display, status_icon))
         end
 
-        -- Result preview (first few lines of output)
+        -- Result preview (first few lines of output).
+        -- For unified diffs, render up to 20 lines inside a ```diff fence
+        -- (un-indented) so render-markdown.nvim highlights +/- lines; for
+        -- plain output, keep the 6-line / 2-space-indent layout.
         if tc._result_preview and tc._result_preview ~= "" and tc._result_preview ~= "(empty result)" then
-          local preview = tc._result_preview
+          local is_diff, body = normalize_diff_preview(tc._result_preview)
+          local max_preview = is_diff and 20 or 6
+          local indent = is_diff and "" or "  "
+
           local preview_lines = {}
           local total_lines = 0
-          for pline in (preview .. "\n"):gmatch("([^\n]*)\n") do
+          for pline in (body .. "\n"):gmatch("([^\n]*)\n") do
             total_lines = total_lines + 1
-            if #preview_lines < 6 then
-              table.insert(preview_lines, "  " .. pline)
+            if #preview_lines < max_preview then
+              table.insert(preview_lines, indent .. pline)
             end
           end
-          for _, pl in ipairs(preview_lines) do
-            table.insert(lines, pl)
+
+          if is_diff then
+            table.insert(lines, "```diff")
+            for _, pl in ipairs(preview_lines) do
+              table.insert(lines, pl)
+            end
+            table.insert(lines, "```")
+          else
+            for _, pl in ipairs(preview_lines) do
+              table.insert(lines, pl)
+            end
           end
-          if total_lines > 6 then
-            table.insert(lines, string.format("  *...%d more lines*", total_lines - 6))
+
+          if total_lines > max_preview then
+            table.insert(lines, string.format("%s*...%d more lines*", indent, total_lines - max_preview))
           end
         elseif status == "error" and tc._result_preview then
           table.insert(lines, "  " .. tc._result_preview)
