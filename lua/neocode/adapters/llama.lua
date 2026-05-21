@@ -42,6 +42,75 @@ function M._build_user_message(text, image_base64)
   return { role = "user", content = text }
 end
 
+local function trim(text)
+  return (text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function make_text_tool_call(prefix, index, name, args)
+  return {
+    id = prefix .. index,
+    type = "function",
+    ["function"] = {
+      name = name,
+      arguments = type(args) == "string" and args or vim.fn.json_encode(args or {}),
+    },
+  }
+end
+
+function M._parse_text_tool_calls(text)
+  text = text or ""
+  local parsed_tool_calls = {}
+  local clean_text = text
+
+  for tc_content in text:gmatch("<tool_call>(.-)<%/tool_call>") do
+    local tc_json = trim(tc_content)
+    local tc_ok, tc_data = pcall(vim.fn.json_decode, tc_json)
+    if tc_ok and type(tc_data) == "table" then
+      local tc_name = tc_data.name or tc_data[1]
+      local tc_args = tc_data.arguments or tc_data.parameters or {}
+      if tc_name then
+        table.insert(parsed_tool_calls, make_text_tool_call("text_call_", #parsed_tool_calls + 1, tc_name, tc_args))
+      end
+    end
+  end
+
+  if #parsed_tool_calls > 0 then
+    clean_text = clean_text:gsub("<tool_call>.-</tool_call>", "")
+    return trim(clean_text), parsed_tool_calls
+  end
+
+  for fn_name, body in text:gmatch("<function=([%w_%.%-:]+)>(.-)</function>") do
+    local args = {}
+    for param_name, param_value in body:gmatch("<parameter=([%w_%.%-:]+)>(.-)</parameter>") do
+      args[param_name] = trim(param_value)
+    end
+    table.insert(parsed_tool_calls, make_text_tool_call("xml_call_", #parsed_tool_calls + 1, fn_name, args))
+  end
+
+  if #parsed_tool_calls > 0 then
+    clean_text = clean_text:gsub("<function=[^>]+>.-</function>", "")
+    return trim(clean_text), parsed_tool_calls
+  end
+
+  for json_tc in text:gmatch('%{"function":%s*".-"%s*,%s*"arguments":%s*%b{}%s*%}') do
+    local tc_ok, tc_data = pcall(vim.fn.json_decode, json_tc)
+    if tc_ok and type(tc_data) == "table" then
+      local tc_name = tc_data["function"] or tc_data.name
+      local tc_args = tc_data.arguments or {}
+      if tc_name then
+        table.insert(parsed_tool_calls, make_text_tool_call("json_call_", #parsed_tool_calls + 1, tc_name, tc_args))
+      end
+    end
+  end
+
+  if #parsed_tool_calls > 0 then
+    clean_text = clean_text:gsub('%{"function":%s*".-"%s*,%s*"arguments":%s*%b{}%s*%}', "")
+    return trim(clean_text), parsed_tool_calls
+  end
+
+  return text, parsed_tool_calls
+end
+
 -- Send messages to llama-server and stream the response into the buffer.
 -- on_done receives (response_text, stats) where stats = { tokens, elapsed, tps, model, thinking_time }
 function M.stream(messages, bufnr, on_done, opts)
@@ -525,53 +594,9 @@ function M.stream(messages, bufnr, on_done, opts)
         if finish_reason == "tool_calls" and #accumulated_tool_calls > 0 then
           if on_done then on_done(text, stats, accumulated_tool_calls) end
         else
-          -- Fallback: parse <tool_call> XML tags from text (some models use this format)
-          local parsed_tool_calls = {}
-          for tc_content in text:gmatch("<tool_call>(.-)<%/tool_call>") do
-            local tc_json = tc_content:gsub("^%s+", ""):gsub("%s+$", "")
-            local tc_ok, tc_data = pcall(vim.fn.json_decode, tc_json)
-            if tc_ok and type(tc_data) == "table" then
-              local tc_name = tc_data.name or tc_data[1]
-              local tc_args = tc_data.arguments or tc_data.parameters or {}
-              if tc_name then
-                table.insert(parsed_tool_calls, {
-                  id = "text_call_" .. #parsed_tool_calls + 1,
-                  type = "function",
-                  ["function"] = {
-                    name = tc_name,
-                    arguments = vim.fn.json_encode(tc_args),
-                  },
-                })
-              end
-            end
-          end
-
-          -- Also detect bare JSON tool calls: {"function": "name", "arguments": {...}}
-          if #parsed_tool_calls == 0 then
-            for json_tc in text:gmatch('%{"function":%s*".-"%s*,%s*"arguments":%s*%b{}%s*%}') do
-              local tc_ok, tc_data = pcall(vim.fn.json_decode, json_tc)
-              if tc_ok and type(tc_data) == "table" then
-                local tc_name = tc_data["function"] or tc_data.name
-                local tc_args = tc_data.arguments or {}
-                if tc_name then
-                  table.insert(parsed_tool_calls, {
-                    id = "json_call_" .. #parsed_tool_calls + 1,
-                    type = "function",
-                    ["function"] = {
-                      name = tc_name,
-                      arguments = type(tc_args) == "string" and tc_args or vim.fn.json_encode(tc_args),
-                    },
-                  })
-                end
-              end
-            end
-          end
+          local clean_text, parsed_tool_calls = M._parse_text_tool_calls(text)
 
           if #parsed_tool_calls > 0 then
-            -- Strip tool call text before passing
-            local clean_text = text:gsub("<tool_call>.-</tool_call>", "")
-            clean_text = clean_text:gsub('%{"function":%s*".-"%s*,%s*"arguments":%s*%b{}%s*%}', "")
-            clean_text = clean_text:gsub("^%s+", ""):gsub("%s+$", "")
             if on_done then on_done(clean_text, stats, parsed_tool_calls) end
           else
             if on_done then on_done(text, stats, nil) end
