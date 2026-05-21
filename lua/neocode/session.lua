@@ -58,6 +58,72 @@ function M._current()
   return _current_id and _sessions[_current_id]
 end
 
+function M._needs_project_tools(text)
+  if type(text) ~= "string" then return false end
+
+  local normalized = text:lower():gsub("^%s+", "")
+  if normalized == "" then return false end
+
+  if normalized == "@chat" or normalized:match("^@chat[%s:]") then
+    return false
+  end
+
+  if normalized == "@project" or normalized:match("^@project[%s:]")
+    or normalized == "@code" or normalized:match("^@code[%s:]")
+    or normalized == "@file" or normalized:match("^@file[%s:]")
+    or normalized == "@files" or normalized:match("^@files[%s:]")
+    or normalized == "/project" or normalized:match("^/project[%s:]")
+    or normalized == "/code" or normalized:match("^/code[%s:]")
+    or normalized == "/file" or normalized:match("^/file[%s:]")
+    or normalized == "/files" or normalized:match("^/files[%s:]") then
+    return true
+  end
+
+  if normalized:match("[%w_%-/]+%.[%a][%w_%-]*") then
+    return true
+  end
+
+  local has_action = normalized:match("%f[%w]read%f[%W]")
+    or normalized:match("%f[%w]open%f[%W]")
+    or normalized:match("%f[%w]show%f[%W]")
+    or normalized:match("%f[%w]inspect%f[%W]")
+    or normalized:match("%f[%w]check%f[%W]")
+    or normalized:match("%f[%w]review%f[%W]")
+    or normalized:match("%f[%w]analy[sz]e%f[%W]")
+    or normalized:match("%f[%w]explain%f[%W]")
+    or normalized:match("%f[%w]fix%f[%W]")
+    or normalized:match("%f[%w]debug%f[%W]")
+    or normalized:match("%f[%w]search%f[%W]")
+    or normalized:match("%f[%w]find%f[%W]")
+    or normalized:match("look%s+at")
+    or normalized:match("%f[%w]scan%f[%W]")
+
+  if not has_action then return false end
+
+  return normalized:match("%f[%w]files?%f[%W]") ~= nil
+    or normalized:match("%f[%w]directory%f[%W]") ~= nil
+    or normalized:match("%f[%w]folder%f[%W]") ~= nil
+    or normalized:match("%f[%w]codebase%f[%W]") ~= nil
+    or normalized:match("%f[%w]repo%s*%f[%W]") ~= nil
+    or normalized:match("%f[%w]repository%f[%W]") ~= nil
+    or normalized:match("%f[%w]project%f[%W]") ~= nil
+    or normalized:match("%f[%w]app%f[%W]") ~= nil
+    or normalized:match("%f[%w]application%f[%W]") ~= nil
+    or normalized:match("%f[%w]code%f[%W]") ~= nil
+    or normalized:match("%f[%w]laravel%f[%W]") ~= nil
+    or normalized:match("%f[%w]routes?%f[%W]") ~= nil
+    or normalized:match("%f[%w]controllers?%f[%W]") ~= nil
+    or normalized:match("%f[%w]models?%f[%W]") ~= nil
+    or normalized:match("%f[%w]migrations?%f[%W]") ~= nil
+    or normalized:match("%f[%w]config%f[%W]") ~= nil
+    or normalized:match("%f[%w]composer%f[%W]") ~= nil
+    or normalized:match("%f[%w]artisan%f[%W]") ~= nil
+    or normalized:match("%f[%w]blade%f[%W]") ~= nil
+    or normalized:match("%f[%w]php%f[%W]") ~= nil
+    or normalized:match("%f[%w]class%f[%W]") ~= nil
+    or normalized:match("%f[%w]function%f[%W]") ~= nil
+end
+
 -- Persistence
 
 local function _sessions_path(config)
@@ -724,7 +790,7 @@ function M._open_api_input(record, config)
       -- Check if MCP tools are available (skip when web search is active to save context)
       local ok_mcp, mcp = pcall(require, "neocode.mcp")
       local tools = nil
-      if not web_search_active and ok_mcp and mcp.available() then
+      if not web_search_active and M._needs_project_tools(text) and ok_mcp and mcp.available() then
         tools = mcp.get_all_tools()
       end
 

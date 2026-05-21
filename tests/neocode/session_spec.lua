@@ -5,6 +5,28 @@ describe("session", function()
     session._reset()  -- clear in-memory state between tests
   end)
 
+  describe("_needs_project_tools", function()
+    it("does not enable project tools for casual chat", function()
+      assert.is_false(session._needs_project_tools("Hi how are you?"))
+      assert.is_false(session._needs_project_tools("thanks, that makes sense"))
+    end)
+
+    it("enables project tools for explicit file requests", function()
+      assert.is_true(session._needs_project_tools("Can you read plan.md for me?"))
+      assert.is_true(session._needs_project_tools("Open routes/web.php and explain it"))
+    end)
+
+    it("enables project tools for codebase and framework requests", function()
+      assert.is_true(session._needs_project_tools("Review this codebase"))
+      assert.is_true(session._needs_project_tools("Can you inspect my Laravel routes?"))
+    end)
+
+    it("supports explicit chat and project overrides", function()
+      assert.is_false(session._needs_project_tools("@chat read plan.md"))
+      assert.is_true(session._needs_project_tools("@project hello"))
+    end)
+  end)
+
   it("creates a record with correct fields", function()
     local s = session._new_record("claude", "Test session")
     assert.is_not_nil(s.id)
