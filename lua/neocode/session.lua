@@ -124,6 +124,105 @@ function M._needs_project_tools(text)
     or normalized:match("%f[%w]function%f[%W]") ~= nil
 end
 
+local function strip_path_token(path)
+  return (path or "")
+    :gsub("^[`'\"]+", "")
+    :gsub("[`'\"]+$", "")
+    :gsub("[,%?%!%:%;%)%]}]+$", "")
+end
+
+function M._extract_direct_read_path(text, cwd)
+  if type(text) ~= "string" then return nil end
+
+  local normalized = text:lower()
+  local asks_to_read = normalized:match("%f[%w]read%f[%W]")
+    or normalized:match("%f[%w]open%f[%W]")
+    or normalized:match("%f[%w]show%f[%W]")
+    or normalized:match("%f[%w]summari[sz]e%f[%W]")
+    or normalized:match("%f[%w]explain%f[%W]")
+    or normalized:match("%f[%w]inspect%f[%W]")
+
+  if not asks_to_read then return nil end
+
+  for raw_path in text:gmatch("[%w_~/%.-]+%.[%w_%-]+") do
+    local path = strip_path_token(raw_path)
+    if path ~= "" then
+      if path:match("^~/") then
+        return vim.fn.expand(path)
+      end
+      if path:match("^/") then
+        return path
+      end
+      if cwd and cwd ~= "" then
+        return cwd .. "/" .. path
+      end
+    end
+  end
+
+  return nil
+end
+
+function M._direct_read_fast_path(text, cwd)
+  local path = M._extract_direct_read_path(text, cwd)
+  if not path then return nil end
+
+  local normalized = text:lower():gsub("^%s+", "")
+  normalized = normalized:gsub("^@project[%s:]+", "")
+  normalized = normalized:gsub("^@file[%s:]+", "")
+  normalized = normalized:gsub("^@files[%s:]+", "")
+  normalized = normalized:gsub("^/project[%s:]+", "")
+  normalized = normalized:gsub("^/file[%s:]+", "")
+  normalized = normalized:gsub("^/files[%s:]+", "")
+
+  local asks_broad_scope = normalized:match("%f[%w]codebase%f[%W]")
+    or normalized:match("%f[%w]project%f[%W]")
+    or normalized:match("%f[%w]repo%s*%f[%W]")
+    or normalized:match("%f[%w]repository%f[%W]")
+    or normalized:match("%f[%w]directory%f[%W]")
+    or normalized:match("%f[%w]folder%f[%W]")
+    or normalized:match("%f[%w]files%f[%W]")
+
+  if asks_broad_scope then return nil end
+  return path
+end
+
+function M._build_direct_file_context_message(path, content)
+  local max_len = 12000
+  local body = content or ""
+  if #body > max_len then
+    body = body:sub(1, max_len) .. string.format("\n\n[truncated: showing first %d chars of %d]", max_len, #content)
+  end
+
+  return {
+    role = "system",
+    _is_direct_file_context = true,
+    content = table.concat({
+      "The user asked to read this exact file. Use this content as authoritative context.",
+      "Do not inspect other files unless the user explicitly asks.",
+      "",
+      "File: " .. path,
+      "```",
+      body,
+      "```",
+    }, "\n"),
+  }
+end
+
+local function read_direct_file(path)
+  local f = io.open(path, "r")
+  if not f then return nil end
+  local content = f:read("*a")
+  f:close()
+  return content
+end
+
+local function has_user_message(messages)
+  for _, msg in ipairs(messages or {}) do
+    if msg.role == "user" then return true end
+  end
+  return false
+end
+
 -- Persistence
 
 local function _sessions_path(config)
@@ -661,7 +760,9 @@ function M._open_api_input(record, config)
     -- _age when injected in the search callback below.
     for i = #record.messages, 1, -1 do
       local msg = record.messages[i]
-      if msg.role == "system" and msg._is_web_search then
+      if msg.role == "system" and msg._is_direct_file_context then
+        table.remove(record.messages, i)
+      elseif msg.role == "system" and msg._is_web_search then
         msg._age = (msg._age or 0) + 1
         if msg._age >= 2 then
           table.remove(record.messages, i)
@@ -674,12 +775,23 @@ function M._open_api_input(record, config)
     local web_search_active = false
 
     local function do_stream()
+      local direct_read_content = nil
+      if not web_search_active then
+        local direct_read_path = M._direct_read_fast_path(text, record.cwd)
+        if direct_read_path and vim.fn.filereadable(direct_read_path) == 1 then
+          direct_read_content = read_direct_file(direct_read_path)
+          if direct_read_content then
+            table.insert(record.messages, M._build_direct_file_context_message(direct_read_path, direct_read_content))
+          end
+        end
+      end
+
       local user_msg = llama._build_user_message(text, record.pending_image_b64)
       record.pending_image_b64 = nil
       table.insert(record.messages, user_msg)
 
       -- Auto-title from first user message
-      if #record.messages == 1 and type(text) == "string" then
+      if not has_user_message(record.messages) and type(text) == "string" then
         local title = text:gsub("\n", " "):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
         if #title > 50 then title = title:sub(1, 47) .. "..." end
         if title ~= "" then
@@ -790,7 +902,7 @@ function M._open_api_input(record, config)
       -- Check if MCP tools are available (skip when web search is active to save context)
       local ok_mcp, mcp = pcall(require, "neocode.mcp")
       local tools = nil
-      if not web_search_active and M._needs_project_tools(text) and ok_mcp and mcp.available() then
+      if not direct_read_content and not web_search_active and M._needs_project_tools(text) and ok_mcp and mcp.available() then
         tools = mcp.get_all_tools()
       end
 
@@ -1242,22 +1354,24 @@ function M.close(config)
       -- Strip non-serializable runtime fields before saving
       local save_messages = {}
       for _, msg in ipairs(s.messages) do
-        local clean = { role = msg.role, content = msg.content }
-        if msg.tool_calls then
-          local clean_tcs = {}
-          for _, tc in ipairs(msg.tool_calls) do
-            table.insert(clean_tcs, {
-              id = tc.id,
-              type = tc.type,
-              ["function"] = tc["function"],
-            })
+        if not (msg.role == "system" and msg._is_direct_file_context) then
+          local clean = { role = msg.role, content = msg.content }
+          if msg.tool_calls then
+            local clean_tcs = {}
+            for _, tc in ipairs(msg.tool_calls) do
+              table.insert(clean_tcs, {
+                id = tc.id,
+                type = tc.type,
+                ["function"] = tc["function"],
+              })
+            end
+            clean.tool_calls = clean_tcs
           end
-          clean.tool_calls = clean_tcs
+          if msg.tool_call_id then
+            clean.tool_call_id = msg.tool_call_id
+          end
+          table.insert(save_messages, clean)
         end
-        if msg.tool_call_id then
-          clean.tool_call_id = msg.tool_call_id
-        end
-        table.insert(save_messages, clean)
       end
       llama_session_mod.save(history_dir, s.id, save_messages)
     end

@@ -27,6 +27,50 @@ describe("session", function()
     end)
   end)
 
+  describe("_extract_direct_read_path", function()
+    it("extracts an explicit absolute file path from read prompts", function()
+      assert.equals(
+        "/Users/johnkarlo/.config/nvim/init.lua",
+        session._extract_direct_read_path("Read /Users/johnkarlo/.config/nvim/init.lua and summarize it")
+      )
+    end)
+
+    it("extracts an explicit relative file path using cwd", function()
+      assert.equals(
+        "/project/plan.md",
+        session._extract_direct_read_path("Can you read plan.md?", "/project")
+      )
+    end)
+
+    it("does not extract paths from broad project requests", function()
+      assert.is_nil(session._extract_direct_read_path("Can you read this project?", "/project"))
+    end)
+  end)
+
+  describe("_direct_read_fast_path", function()
+    it("allows explicit project prefix for exact file reads", function()
+      assert.equals(
+        "/project/plan.md",
+        session._direct_read_fast_path("@project read plan.md and summarize it", "/project")
+      )
+    end)
+
+    it("does not fast path mixed broad project requests", function()
+      assert.is_nil(session._direct_read_fast_path("read package.json and inspect the project", "/project"))
+    end)
+  end)
+
+  describe("_build_direct_file_context_message", function()
+    it("builds a bounded context message for direct file reads", function()
+      local msg = session._build_direct_file_context_message("/tmp/example.lua", "print('hello')")
+
+      assert.equals("system", msg.role)
+      assert.is_true(msg._is_direct_file_context)
+      assert.is_truthy(msg.content:find("/tmp/example.lua", 1, true))
+      assert.is_truthy(msg.content:find("print('hello')", 1, true))
+    end)
+  end)
+
   it("creates a record with correct fields", function()
     local s = session._new_record("claude", "Test session")
     assert.is_not_nil(s.id)
