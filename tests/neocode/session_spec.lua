@@ -14,16 +14,19 @@ describe("session", function()
     it("enables project tools for explicit file requests", function()
       assert.is_true(session._needs_project_tools("Can you read plan.md for me?"))
       assert.is_true(session._needs_project_tools("Open routes/web.php and explain it"))
+      assert.is_true(session._needs_project_tools("Can you read the readme and tell me what this project is about?"))
     end)
 
     it("enables project tools for codebase and framework requests", function()
       assert.is_true(session._needs_project_tools("Review this codebase"))
       assert.is_true(session._needs_project_tools("Can you inspect my Laravel routes?"))
+      assert.is_true(session._needs_project_tools("what is this project about?"))
     end)
 
     it("supports explicit chat and project overrides", function()
       assert.is_false(session._needs_project_tools("@chat read plan.md"))
       assert.is_true(session._needs_project_tools("@project hello"))
+      assert.is_true(session._needs_project_tools("/readfile README.md"))
     end)
   end)
 
@@ -47,7 +50,22 @@ describe("session", function()
         table.insert(names, schema["function"].name)
       end
 
-      assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files" }, names)
+      assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files", "neocode__web_search" }, names)
+    end)
+
+    it("offers web search as a model-chosen tool for current-info prompts", function()
+      local tools = session._build_project_tools("what is the weather today?", "/project")
+      assert.equals("neocode__web_search", tools[1]["function"].name)
+    end)
+
+    it("does not replace local README reads with web-only tools", function()
+      local tools = session._build_project_tools("read the readme and tell me what is this project about", "/project")
+      local names = {}
+      for _, schema in ipairs(tools or {}) do
+        table.insert(names, schema["function"].name)
+      end
+
+      assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files", "neocode__web_search" }, names)
     end)
   end)
 
@@ -69,6 +87,20 @@ describe("session", function()
     it("does not extract paths from broad project requests", function()
       assert.is_nil(session._extract_direct_read_path("Can you read this project?", "/project"))
     end)
+
+    it("extracts README when the user asks to read the readme", function()
+      assert.equals(
+        "/project/README.md",
+        session._extract_direct_read_path("Hi, can you read the readme and tell me what the project is about?", "/project")
+      )
+    end)
+
+    it("extracts paths from /readfile commands", function()
+      assert.equals(
+        "/project/README.md",
+        session._extract_direct_read_path("/readfile README.md", "/project")
+      )
+    end)
   end)
 
   describe("_direct_read_fast_path", function()
@@ -76,6 +108,13 @@ describe("session", function()
       assert.equals(
         "/project/plan.md",
         session._direct_read_fast_path("@project read plan.md and summarize it", "/project")
+      )
+    end)
+
+    it("allows /readfile for exact file reads", function()
+      assert.equals(
+        "/project/README.md",
+        session._direct_read_fast_path("/readfile README.md", "/project")
       )
     end)
 
@@ -129,6 +168,21 @@ describe("session", function()
     local a = session._new_record("claude", "A")
     local b = session._new_record("claude", "B")
     assert.not_equals(a.id, b.id)
+  end)
+
+  it("renames an in-memory session record", function()
+    local s = session._new_record("claude", "Old")
+    session._rename_record(s, "New")
+    assert.equals("New", s.title)
+  end)
+
+  it("strips transient web-search system context from saved API messages", function()
+    local messages = session._clean_api_messages({
+      { role = "system", content = "web search results", _is_web_search = true },
+      { role = "user", content = "hello" },
+    })
+
+    assert.same({ { role = "user", content = "hello" } }, messages)
   end)
 end)
 

@@ -45,6 +45,14 @@ function M._remove(id)
   if _current_id == id then _current_id = nil end
 end
 
+function M._rename_record(record, new_title)
+  if not record or type(new_title) ~= "string" then return false end
+  local title = new_title:gsub("^%s+", ""):gsub("%s+$", "")
+  if title == "" then return false end
+  record.title = title
+  return true
+end
+
 function M._all()
   local list = {}
   for _, s in pairs(_sessions) do
@@ -77,7 +85,19 @@ function M._needs_project_tools(text)
     or normalized == "/code" or normalized:match("^/code[%s:]")
     or normalized == "/file" or normalized:match("^/file[%s:]")
     or normalized == "/files" or normalized:match("^/files[%s:]")
+    or normalized == "/readfile" or normalized:match("^/readfile[%s:]")
     or normalized == "/mcp" or normalized:match("^/mcp[%s:]") then
+    return true
+  end
+
+  if normalized:match("%f[%w]readme%f[%W]") then
+    return true
+  end
+
+  if normalized:match("%f[%w]this%s+project%f[%W]")
+    or normalized:match("%f[%w]this%s+repo%s*%f[%W]")
+    or normalized:match("%f[%w]this%s+repository%f[%W]")
+    or normalized:match("%f[%w]this%s+codebase%f[%W]") then
     return true
   end
 
@@ -140,15 +160,23 @@ local function extend_list(dst, src)
 end
 
 function M._build_project_tools(text, cwd)
-  if not (M._needs_project_tools(text) or M._needs_mcp_tools(text)) then return nil end
+  local ok_web, web_search = pcall(require, "neocode.web_search")
+  local wants_project_tools = M._needs_project_tools(text)
+  local wants_mcp_tools = M._needs_mcp_tools(text)
+  local wants_web_tool = ok_web and web_search.needs_search(text)
+  if not (wants_project_tools or wants_mcp_tools or wants_web_tool) then return nil end
 
   local tools = {}
   local ok_local, local_tools = pcall(require, "neocode.local_tools")
-  if ok_local then
+  if ok_local and wants_project_tools then
     extend_list(tools, local_tools.get_tools(cwd))
   end
 
-  if M._needs_mcp_tools(text) then
+  if ok_web and (wants_project_tools or wants_web_tool) then
+    table.insert(tools, web_search.get_tool())
+  end
+
+  if wants_mcp_tools then
     local ok_mcp, mcp = pcall(require, "neocode.mcp")
     if ok_mcp and mcp.available() then
       extend_list(tools, mcp.get_all_tools())
@@ -176,8 +204,13 @@ function M._extract_direct_read_path(text, cwd)
     or normalized:match("%f[%w]summari[sz]e%f[%W]")
     or normalized:match("%f[%w]explain%f[%W]")
     or normalized:match("%f[%w]inspect%f[%W]")
+    or normalized:match("^%s*/readfile[%s:]")
 
   if not asks_to_read then return nil end
+
+  if normalized:match("%f[%w]readme%f[%W]") and cwd and cwd ~= "" then
+    return cwd .. "/README.md"
+  end
 
   for raw_path in text:gmatch("[%w_~/%.-]+%.[%w_%-]+") do
     local path = strip_path_token(raw_path)
@@ -208,6 +241,7 @@ function M._direct_read_fast_path(text, cwd)
   normalized = normalized:gsub("^/project[%s:]+", "")
   normalized = normalized:gsub("^/file[%s:]+", "")
   normalized = normalized:gsub("^/files[%s:]+", "")
+  normalized = normalized:gsub("^/readfile[%s:]+", "")
 
   local asks_broad_scope = normalized:match("%f[%w]codebase%f[%W]")
     or normalized:match("%f[%w]project%f[%W]")
@@ -333,10 +367,10 @@ function M._store_for_record(config, record)
   })
 end
 
-local function clean_api_messages(messages)
+function M._clean_api_messages(messages)
   local save_messages = {}
   for _, msg in ipairs(messages or {}) do
-    if not (msg.role == "system" and msg._is_direct_file_context) then
+    if not (msg.role == "system" and (msg._is_direct_file_context or msg._is_web_search)) then
       local clean = { role = msg.role, content = msg.content }
       if msg.tool_calls then
         local clean_tcs = {}
@@ -369,7 +403,7 @@ function M._save_api_messages(config, record, messages)
     created_at = record.created_at,
     cwd = record.cwd,
   })
-  return store.save_messages(record.id, clean_api_messages(messages))
+  return store.save_messages(record.id, M._clean_api_messages(messages))
 end
 
 function M._load_api_messages(config, record)
@@ -434,6 +468,22 @@ function M.rename_on_disk(session_id, new_title, config)
     end
   end
   _write_sessions_json(_sessions_path(config), all)
+end
+
+function M.rename_current(config)
+  local s = M._current()
+  if not s then
+    vim.notify("neocode: no active session to rename", vim.log.levels.INFO)
+    return
+  end
+  vim.ui.input({ prompt = "Rename session: ", default = s.title }, function(input)
+    if not input or not M._rename_record(s, input) then return end
+    M._persist(config)
+    if s.api_adapter and s.messages and #s.messages > 0 then
+      M._save_api_messages(config, s, s.messages)
+    end
+    vim.notify("neocode: renamed session to '" .. s.title .. "'", vim.log.levels.INFO)
+  end)
 end
 
 -- Terminal lifecycle
@@ -697,6 +747,7 @@ function M._register_api_keymaps(buf, record, config)
     require("neocode.hints").toggle()
   end, opts)
   vim.keymap.set("n", "H", function() M.toggle(config) end, opts)
+  vim.keymap.set("n", "R", function() M.rename_current(config) end, opts)
 
   -- h opens session history picker
   vim.keymap.set("n", "h", function()
@@ -878,6 +929,19 @@ function M._open_api_input(record, config)
     -- Handle /compact command
     if text:match("^%s*/compact") then
       M._compact_session(record, config)
+      return
+    end
+
+    local rename_title = text:match("^%s*/rename%s+(.+)%s*$")
+    if rename_title then
+      if M._rename_record(record, rename_title) then
+        M._persist(config)
+        if record.messages and #record.messages > 0 then
+          M._save_api_messages(config, record, record.messages)
+        end
+        chat_buffer.refresh(record.bufnr, record.messages)
+        vim.notify("neocode: renamed session to '" .. record.title .. "'", vim.log.levels.INFO)
+      end
       return
     end
 
@@ -1205,6 +1269,24 @@ function M._open_api_input(record, config)
               return
             end
 
+            if resolved_fn.name == "neocode__web_search" then
+              local ok_args, args = pcall(vim.fn.json_decode, resolved_fn.arguments or "{}")
+              if not ok_args or type(args) ~= "table" then args = {} end
+              local query = args.query or ""
+              if query == "" then
+                callback("Missing required web search query", true)
+                return
+              end
+              web_search.search(query, function(results)
+                if results then
+                  callback(web_search.format_context(query, results), false)
+                else
+                  callback("No web search results found", true)
+                end
+              end)
+              return
+            end
+
             local function execute_mcp()
               if not ok_mcp or not mcp.available() then
                 callback("Tool is not available: " .. tostring(resolved_fn.name or "unknown"), true)
@@ -1291,7 +1373,7 @@ function M._open_api_input(record, config)
     end
 
     -- Auto-detect if web search is needed (skip MCP tools when searching)
-    if web_search.needs_search(text) then
+    if web_search.is_explicit(text) then
       web_search_active = true
       -- Show searching indicator
       vim.bo[record.bufnr].modifiable = true
@@ -1615,6 +1697,8 @@ function M._register_buf_keymaps(buf, record, config)
   vim.keymap.set("n", "?", function()
     require("neocode.hints").toggle()
   end, opts)
+
+  vim.keymap.set("n", "R", function() M.rename_current(config) end, opts)
 
   -- h opens the adapter's native session picker (e.g. claude --resume)
   vim.keymap.set("n", "h", function()

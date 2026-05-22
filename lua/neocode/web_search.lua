@@ -17,9 +17,33 @@ local SEARCH_PATTERNS = {
   "browse", "@web",
 }
 
+function M.is_explicit(text)
+  local lower = (text or ""):lower():gsub("^%s+", "")
+  return lower:match("^/websearch[%s:]") ~= nil or lower == "/websearch"
+    or lower:match("^@web[%s:]") ~= nil or lower == "@web"
+end
+
 -- Check if a message likely needs web search
 function M.needs_search(text)
-  local lower = text:lower()
+  local lower = (text or ""):lower():gsub("^%s+", "")
+
+  if M.is_explicit(text) then
+    return true
+  end
+
+  if lower:match("^/readfile[%s:]") or lower == "/readfile" then
+    return false
+  end
+
+  if lower:match("%f[%w]read%f[%W].-%f[%w]readme%f[%W]")
+    or lower:match("%f[%w]readme%f[%W]")
+    or lower:match("%f[%w]this%s+project%f[%W]")
+    or lower:match("%f[%w]this%s+repo%s*%f[%W]")
+    or lower:match("%f[%w]this%s+repository%f[%W]")
+    or lower:match("%f[%w]this%s+codebase%f[%W]") then
+    return false
+  end
+
   for _, pattern in ipairs(SEARCH_PATTERNS) do
     if lower:find(pattern, 1, true) then
       return true
@@ -30,9 +54,27 @@ end
 
 -- Extract a search query from the user's message
 function M.extract_query(text)
-  local q = text:gsub("^%s*@web%s*", "")
+  local q = text:gsub("^%s*@web[%s:]*", "")
+  q = q:gsub("^%s*/websearch[%s:]*", "")
   if #q > 200 then q = q:sub(1, 200) end
   return q
+end
+
+function M.get_tool()
+  return {
+    type = "function",
+    ["function"] = {
+      name = "neocode__web_search",
+      description = "Search the web for current or external information. Use this only when project files are insufficient or the user asks for current/latest/web information.",
+      parameters = {
+        type = "object",
+        properties = {
+          query = { type = "string", description = "Search query." },
+        },
+        required = { "query" },
+      },
+    },
+  }
 end
 
 -- Path to the venv Python

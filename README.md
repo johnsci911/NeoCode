@@ -219,9 +219,10 @@ When no instruction files exist, auto-detects:
 
 ### Web Search
 
-- Auto-detects queries needing current info (keywords: "latest", "news", "2025", etc.)
+- `/websearch` prefix forces a web search before the model responds
+- For ordinary prompts, web search is exposed as a model-selectable tool when the prompt looks like it may need current or external information
 - DuckDuckGo search via Python `ddgs` package (auto-installs)
-- `@web` prefix forces a search
+- `@web` prefix also forces a search
 - Results injected as context for the model
 
 ### Session Management
@@ -229,6 +230,7 @@ When no instruction files exist, auto-detects:
 - Auto-title sessions from first message
 - Save and resume conversations across Neovim restarts
 - `/compact` command — summarize conversation to free context
+- `/rename <title>` command or `R` keymap — rename the current session
 - Session history picker with timestamps (`h` keymap)
 - Multi-select delete (`<Tab>` to select, `d` to delete)
 - Auto-switch to next session on close (`Q`)
@@ -248,6 +250,7 @@ When no instruction files exist, auto-detects:
 |--------|--------|
 | `i` | Open multi-line input window |
 | `h` | Session history picker (resume/delete/rename) |
+| `R` | Rename current session |
 | `<leader>p` | Paste image from clipboard |
 | `<C-c>` | Interrupt the AI |
 | `Q` | Close session (switches to next if available) |
@@ -271,6 +274,9 @@ When no instruction files exist, auto-detects:
 | Command | Action |
 |---------|--------|
 | `/compact` | Summarize conversation to free context |
+| `/rename <title>` | Rename current session |
+| `/readfile <path>` | Read an exact local file without web search |
+| `/websearch <query>` | Force web search for current/external information |
 
 ### Session picker (`h`)
 
@@ -291,7 +297,7 @@ require("neocode").setup({
   keymap_prefix      = "<leader>ai",
   data_dir           = vim.fn.stdpath("data") .. "/neocode",
   telescope_fallback = true,
-  winbar             = "  ? help  h resume  i input  <leader>p image  <C-c> stop  H toggle  { } cycle\n",
+  winbar             = "  ? help  h resume  i input  R rename  <leader>p image  <C-c> stop  H toggle  { } cycle\n",
   adapters = {
     claude = require("neocode.adapters.claude"),
   },

@@ -1,0 +1,21 @@
+local web_search = require("neocode.web_search")
+
+describe("web_search", function()
+  it("does not search the web for local README/project questions", function()
+    assert.is_false(web_search.needs_search("Hi, can you read the readme and tell me what is the project all about?"))
+    assert.is_false(web_search.needs_search("what is this project about?"))
+  end)
+
+  it("still searches explicit web/current-info prompts", function()
+    assert.is_true(web_search.needs_search("@web what is the latest Neovim release?"))
+    assert.is_true(web_search.needs_search("/websearch what is the latest Neovim release?"))
+    assert.is_true(web_search.needs_search("search the web for Qwen latest release"))
+    assert.is_true(web_search.needs_search("what is the weather today?"))
+  end)
+
+  it("extracts /websearch queries", function()
+    assert.equals("what is the latest Neovim release?", web_search.extract_query("/websearch what is the latest Neovim release?"))
+    assert.equals("what is the latest Neovim release?", web_search.extract_query("/websearch: what is the latest Neovim release?"))
+    assert.equals("what is the latest Neovim release?", web_search.extract_query("@web: what is the latest Neovim release?"))
+  end)
+end)
