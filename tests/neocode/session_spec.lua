@@ -187,6 +187,23 @@ describe("session persistence", function()
     assert.is_truthy(content:find("status"))
   end)
 
+  it("_persist() includes cwd for project-scoped API session resume", function()
+    local s = session._new_record("claude", "Project scoped")
+    s.cwd = "/tmp/project-root"
+    session._add(s)
+    session._persist(config)
+    local all = session.load_all_from_disk(config)
+    assert.equals("/tmp/project-root", all[1].cwd)
+  end)
+
+  it("_persist() writes private sessions.json", function()
+    local s = session._new_record("claude", "Private metadata")
+    session._add(s)
+    session._persist(config)
+
+    assert.equals("rw-------", vim.fn.getfperm(tmp_dir .. "/sessions.json"))
+  end)
+
   it("_persist() skips sessions with session_store = false", function()
     local opencode_adapter = {
       name          = "opencode",
@@ -237,6 +254,20 @@ describe("session disk operations", function()
     assert.equals(0, #all)
   end)
 
+  it("delete_from_disk() removes layered session data", function()
+    local s = session._new_record("claude", "Delete layered")
+    s.cwd = "/tmp/project-root"
+    session._add(s)
+    session._persist(config)
+    session._save_api_messages(config, s, { { role = "user", content = "hello" } })
+    local store = session._store_for_record(config, s)
+    assert.equals(1, vim.fn.isdirectory(store.session_dir(s.id)))
+
+    session.delete_from_disk(s.id, config)
+
+    assert.equals(0, vim.fn.isdirectory(store.session_dir(s.id)))
+  end)
+
   it("rename_on_disk() updates session title", function()
     local s = session._new_record("claude", "Old name")
     session._add(s)
@@ -244,5 +275,146 @@ describe("session disk operations", function()
     session.rename_on_disk(s.id, "New name", config)
     local all = session.load_all_from_disk(config)
     assert.equals("New name", all[1].title)
+  end)
+
+  it("rename_on_disk() updates layered session metadata", function()
+    local s = session._new_record("claude", "Old name")
+    s.cwd = "/tmp/project-root"
+    session._add(s)
+    session._persist(config)
+    session._save_api_messages(config, s, { { role = "user", content = "hello" } })
+
+    session.rename_on_disk(s.id, "New name", config)
+
+    local meta = session._store_for_record(config, s).load_meta(s.id)
+    assert.equals("New name", meta.title)
+  end)
+end)
+
+describe("api session layered store integration", function()
+  local tmp_dir
+  local config
+
+  before_each(function()
+    session._reset()
+    tmp_dir = vim.fn.tempname()
+    vim.fn.mkdir(tmp_dir, "p")
+    config = { data_dir = tmp_dir, adapters = {} }
+  end)
+
+  after_each(function()
+    vim.fn.delete(tmp_dir, "rf")
+  end)
+
+  local function record()
+    return {
+      id = "sess-layered",
+      adapter = "llama",
+      title = "Layered session",
+      created_at = 456,
+      cwd = "/Users/example/project",
+    }
+  end
+
+  it("saves and loads API messages from the project-scoped layered store", function()
+    local r = record()
+    local messages = {
+      { role = "user", content = "hello" },
+      { role = "assistant", content = "hi" },
+    }
+
+    session._save_api_messages(config, r, messages)
+
+    assert.are.same(messages, session._load_api_messages(config, r))
+    assert.equals(1, vim.fn.filereadable(session._store_for_record(config, r).session_dir(r.id) .. "/messages.json"))
+  end)
+
+  it("appends raw transcript events independently of prompt-ready messages", function()
+    local r = record()
+
+    session._append_transcript(config, r, { role = "user", content = "raw detail" })
+
+    local transcript_path = session._store_for_record(config, r).session_dir(r.id) .. "/transcript.jsonl"
+    local lines = vim.fn.readfile(transcript_path)
+    assert.equals(1, #lines)
+    assert.equals("raw detail", vim.fn.json_decode(lines[1]).content)
+  end)
+
+  it("saves compacted summaries without deleting transcript history", function()
+    local r = record()
+    session._append_transcript(config, r, { role = "user", content = "before compact" })
+
+    session._save_api_summary(config, r, "Summary after compaction")
+
+    local store = session._store_for_record(config, r)
+    assert.equals("Summary after compaction", store.load_summary(r.id))
+    local transcript = table.concat(vim.fn.readfile(store.session_dir(r.id) .. "/transcript.jsonl"), "\n")
+    assert.is_truthy(transcript:find("before compact", 1, true))
+  end)
+
+  it("falls back to legacy llama history only when layered messages are missing", function()
+    local r = record()
+    local legacy = require("neocode.llama_session")
+    legacy.save(tmp_dir .. "/llama", r.id, { { role = "user", content = "legacy" } })
+
+    assert.equals("legacy", session._load_api_messages(config, r)[1].content)
+  end)
+
+  it("prefers layered messages over legacy llama history", function()
+    local r = record()
+    local legacy = require("neocode.llama_session")
+    legacy.save(tmp_dir .. "/llama", r.id, { { role = "user", content = "legacy" } })
+    session._save_api_messages(config, r, { { role = "user", content = "layered" } })
+
+    assert.equals("layered", session._load_api_messages(config, r)[1].content)
+  end)
+
+  it("does not fall back to stale legacy history when layered messages are corrupt", function()
+    local r = record()
+    local legacy = require("neocode.llama_session")
+    legacy.save(tmp_dir .. "/llama", r.id, { { role = "user", content = "legacy" } })
+
+    local store = session._store_for_record(config, r)
+    vim.fn.mkdir(store.session_dir(r.id), "p")
+    vim.fn.writefile({ "not valid json" }, store.session_dir(r.id) .. "/messages.json")
+
+    assert.are.same({}, session._load_api_messages(config, r))
+  end)
+
+  it("loads project-scoped messages using cwd from saved session metadata", function()
+    local r = record()
+    session._save_api_messages(config, r, { { role = "user", content = "from original cwd" } })
+
+    local resumed = {
+      id = r.id,
+      adapter = r.adapter,
+      title = r.title,
+      created_at = r.created_at,
+      cwd = r.cwd,
+    }
+
+    assert.equals("from original cwd", session._load_api_messages(config, resumed)[1].content)
+  end)
+
+  it("resume_api uses persisted cwd when rebuilding an API session", function()
+    local r = record()
+    session._save_api_messages(config, r, { { role = "user", content = "from original cwd" } })
+
+    local adapter = { name = "llama", type = "api", session_store = true }
+    session.resume_api(adapter, {
+      id = r.id,
+      adapter = r.adapter,
+      title = r.title,
+      created_at = r.created_at,
+      cwd = r.cwd,
+    }, config)
+
+    local resumed = session._get(r.id)
+    assert.equals(r.cwd, resumed.cwd)
+    assert.equals("from original cwd", resumed.messages[1].content)
+
+    if resumed.bufnr and vim.api.nvim_buf_is_valid(resumed.bufnr) then
+      vim.api.nvim_buf_delete(resumed.bufnr, { force = true })
+    end
   end)
 end)

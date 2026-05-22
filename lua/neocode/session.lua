@@ -267,10 +267,13 @@ end
 local function _write_sessions_json(path, list)
   local ok, encoded = pcall(vim.fn.json_encode, list)
   if ok then
+    vim.fn.mkdir(vim.fn.fnamemodify(path, ":h"), "p")
+    pcall(vim.fn.setfperm, vim.fn.fnamemodify(path, ":h"), "rwx------")
     local f = io.open(path, "w")
     if f then
       f:write(encoded)
       f:close()
+      pcall(vim.fn.setfperm, path, "rw-------")
     else
       vim.notify("neocode: could not write " .. path, vim.log.levels.WARN)
     end
@@ -297,6 +300,7 @@ function M._persist(config)
         title      = s.title,
         status     = s.status or "active",
         created_at = s.created_at,
+        cwd        = s.cwd,
       })
     end
   end
@@ -321,11 +325,89 @@ function M.load_all_from_disk(config)
   return data
 end
 
+function M._store_for_record(config, record)
+  local session_store = require("neocode.session_store")
+  return session_store.new({
+    data_dir = config and config.data_dir,
+    cwd = (record and record.cwd) or require("neocode.context").find_project_root(),
+  })
+end
+
+local function clean_api_messages(messages)
+  local save_messages = {}
+  for _, msg in ipairs(messages or {}) do
+    if not (msg.role == "system" and msg._is_direct_file_context) then
+      local clean = { role = msg.role, content = msg.content }
+      if msg.tool_calls then
+        local clean_tcs = {}
+        for _, tc in ipairs(msg.tool_calls) do
+          table.insert(clean_tcs, {
+            id = tc.id,
+            type = tc.type,
+            ["function"] = tc["function"],
+          })
+        end
+        clean.tool_calls = clean_tcs
+      end
+      if msg.tool_call_id then
+        clean.tool_call_id = msg.tool_call_id
+      end
+      table.insert(save_messages, clean)
+    end
+  end
+  return save_messages
+end
+
+function M._save_api_messages(config, record, messages)
+  if not record or not record.id then return false end
+  local store = M._store_for_record(config, record)
+  store.save_meta({
+    id = record.id,
+    adapter = record.adapter,
+    title = record.title,
+    status = record.status or "active",
+    created_at = record.created_at,
+    cwd = record.cwd,
+  })
+  return store.save_messages(record.id, clean_api_messages(messages))
+end
+
+function M._load_api_messages(config, record)
+  if not record or not record.id then return {} end
+  local store = M._store_for_record(config, record)
+  if store.has_messages(record.id) then
+    return store.load_messages(record.id)
+  end
+
+  local ok_legacy, llama_session_mod = pcall(require, "neocode.llama_session")
+  if ok_legacy and config and config.data_dir then
+    return llama_session_mod.load(config.data_dir .. "/llama", record.id)
+  end
+  return {}
+end
+
+function M._append_transcript(config, record, event)
+  if not record or not record.id or not event then return false end
+  local store = M._store_for_record(config, record)
+  return store.append_transcript(record.id, event)
+end
+
+function M._save_api_summary(config, record, summary)
+  if not record or not record.id then return false end
+  local store = M._store_for_record(config, record)
+  return store.save_summary(record.id, summary or "")
+end
+
 function M.delete_from_disk(session_id, config)
   local all = M.load_all_from_disk(config)
   local filtered = {}
   for _, s in ipairs(all) do
-    if s.id ~= session_id then
+    if s.id == session_id then
+      local ok_store, store = pcall(M._store_for_record, config, s)
+      if ok_store and store then
+        pcall(function() store.delete_session(session_id) end)
+      end
+    else
       table.insert(filtered, s)
     end
   end
@@ -337,6 +419,17 @@ function M.rename_on_disk(session_id, new_title, config)
   for _, s in ipairs(all) do
     if s.id == session_id then
       s.title = new_title
+      local ok_store, store = pcall(M._store_for_record, config, s)
+      if ok_store and store then
+        local meta = store.load_meta(session_id) or {}
+        meta.id = meta.id or s.id
+        meta.adapter = meta.adapter or s.adapter
+        meta.status = meta.status or s.status
+        meta.created_at = meta.created_at or s.created_at
+        meta.cwd = meta.cwd or s.cwd
+        meta.title = new_title
+        store.save_meta(meta)
+      end
       break
     end
   end
@@ -416,7 +509,6 @@ end
 
 function M.create_api(adapter, title, config)
   local chat_buffer = require("neocode.chat_buffer")
-  local llama_session_mod = require("neocode.llama_session")
 
   local record = M._new_record(adapter.name, title)
   record.messages = {}
@@ -426,8 +518,7 @@ function M.create_api(adapter, title, config)
   M._add(record)
   _current_id = record.id
 
-  local history_dir = config.data_dir .. "/llama"
-  local saved = llama_session_mod.load(history_dir, record.id)
+  local saved = M._load_api_messages(config, record)
   if #saved > 0 then
     record.messages = saved
   end
@@ -470,7 +561,6 @@ end
 -- Resume a saved API session by loading its messages from disk.
 function M.resume_api(adapter, session_data, config)
   local chat_buffer = require("neocode.chat_buffer")
-  local llama_session_mod = require("neocode.llama_session")
 
   -- Check if already in memory (avoid duplicates)
   local existing = M._get(session_data.id)
@@ -495,14 +585,13 @@ function M.resume_api(adapter, session_data, config)
     messages      = {},
     api_adapter   = adapter,
     pending_image_b64 = nil,
-    cwd           = require("neocode.context").find_project_root(),
+    cwd           = session_data.cwd or require("neocode.context").find_project_root(),
   }
   M._add(record)
   _current_id = record.id
 
   -- Load saved messages and clean up stale entries
-  local history_dir = config.data_dir .. "/llama"
-  local saved = llama_session_mod.load(history_dir, record.id)
+  local saved = M._load_api_messages(config, record)
   if #saved > 0 then
     -- Filter out empty/broken messages from history
     local clean = {}
@@ -621,7 +710,6 @@ end
 -- Compact session: summarize conversation to free context
 function M._compact_session(record, config)
   local chat_buffer = require("neocode.chat_buffer")
-  local llama_session_mod = require("neocode.llama_session")
   local llama = record.api_adapter
 
   if #record.messages < 3 then
@@ -715,6 +803,13 @@ function M._compact_session(record, config)
           { role = "user", content = "Summarize our conversation so far." },
           { role = "assistant", content = "Here is a summary of our conversation:\n\n" .. summary },
         }
+        M._save_api_summary(config, record, summary)
+        M._append_transcript(config, record, {
+          role = "system",
+          kind = "compact",
+          content = summary,
+          old_message_count = old_count,
+        })
 
         -- Refresh display
         chat_buffer.refresh(record.bufnr, record.messages)
@@ -728,9 +823,8 @@ function M._compact_session(record, config)
         })
         vim.bo[record.bufnr].modifiable = false
 
-        -- Save compacted history
-        local history_dir = config.data_dir .. "/llama"
-        llama_session_mod.save(history_dir, record.id, record.messages)
+        -- Save compacted prompt-ready history without deleting the raw transcript.
+        M._save_api_messages(config, record, record.messages)
 
         vim.notify("neocode: conversation compacted", vim.log.levels.INFO)
       end)
@@ -740,7 +834,6 @@ end
 
 function M._open_api_input(record, config)
   local chat_buffer = require("neocode.chat_buffer")
-  local llama_session_mod = require("neocode.llama_session")
   local llama = record.api_adapter
 
   local buf = vim.api.nvim_create_buf(false, true)
@@ -824,6 +917,7 @@ function M._open_api_input(record, config)
       local user_msg = llama._build_user_message(text, record.pending_image_b64)
       record.pending_image_b64 = nil
       table.insert(record.messages, user_msg)
+      M._append_transcript(config, record, user_msg)
 
       -- Auto-title from first user message
       if not has_user_message(record.messages) and type(text) == "string" then
@@ -1038,11 +1132,15 @@ function M._open_api_input(record, config)
         -- Response complete
         auto_continue_count = 0
         record.job_id = nil
+        M._append_transcript(config, record, {
+          role = "assistant",
+          content = response_text,
+          _stats = stats,
+        })
 
         chat_buffer.refresh(record.bufnr, record.messages)
 
-        local history_dir = config.data_dir .. "/llama"
-        llama_session_mod.save(history_dir, record.id, record.messages)
+        M._save_api_messages(config, record, record.messages)
       end
 
       if tools and #tools > 0 then
@@ -1149,6 +1247,14 @@ function M._open_api_input(record, config)
                   end
                 end
               end
+            end
+            if status == "done" or status == "error" then
+              M._append_transcript(config, record, {
+                role = "tool",
+                tool_call_id = tool_call.id,
+                status = status,
+                content = result_text,
+              })
             end
             if record.bufnr and vim.api.nvim_buf_is_valid(record.bufnr) then
               chat_buffer.refresh(record.bufnr, record.messages)
@@ -1396,31 +1502,7 @@ function M.close(config)
   if s.api_adapter then
     -- Save messages to disk before closing
     if s.messages and #s.messages > 0 then
-      local llama_session_mod = require("neocode.llama_session")
-      local history_dir = config.data_dir .. "/llama"
-      -- Strip non-serializable runtime fields before saving
-      local save_messages = {}
-      for _, msg in ipairs(s.messages) do
-        if not (msg.role == "system" and msg._is_direct_file_context) then
-          local clean = { role = msg.role, content = msg.content }
-          if msg.tool_calls then
-            local clean_tcs = {}
-            for _, tc in ipairs(msg.tool_calls) do
-              table.insert(clean_tcs, {
-                id = tc.id,
-                type = tc.type,
-                ["function"] = tc["function"],
-              })
-            end
-            clean.tool_calls = clean_tcs
-          end
-          if msg.tool_call_id then
-            clean.tool_call_id = msg.tool_call_id
-          end
-          table.insert(save_messages, clean)
-        end
-      end
-      llama_session_mod.save(history_dir, s.id, save_messages)
+      M._save_api_messages(config, s, s.messages)
     end
 
     s.status = "closed"
