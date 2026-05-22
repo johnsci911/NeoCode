@@ -184,7 +184,7 @@ function M.stream(messages, bufnr, on_done, opts)
       "You are a local AI assistant running via llama.cpp inside NeoCode (a Neovim plugin). You operate entirely on the user's machine.",
       "",
       "Capabilities that may be present in this conversation:",
-      "- MCP tools: if an \"Available tools\" list appears later in this system prompt, you CAN read files, list directories, search code, and run commands on the user's filesystem using those tools. Call them directly — do not ask the user to paste file contents.",
+      "- Local/MCP tools: if an \"Available tools\" list appears later in this system prompt, you CAN read files, list directories, search code, and use other listed tools. Call them directly — do not ask the user to paste file contents.",
       "- Web search results: if a system message containing live web search results appears in your context, use it as current authoritative information and answer from it.",
       "",
       "Do NOT claim you \"cannot browse the internet\", \"cannot access files\", or \"have a knowledge cutoff of [date]\" — in this environment those statements are false. Do not invent or roleplay as a different AI. Do not fabricate citations like [1][2][3] — if you reference search results, quote or summarize the actual content in your context.",
@@ -232,7 +232,7 @@ function M.stream(messages, bufnr, on_done, opts)
 
       default_prompt = default_prompt .. project_info .. tools_list
         .. "\n\nIMPORTANT: You have direct access to the user's filesystem and project files through the tools listed above. You CAN read files, list directories, search code, and execute commands. Do NOT tell the user you cannot access their files. Do NOT ask users to paste code or share URLs. Instead, USE the tools to read their files directly."
-        .. "\nWhen the user asks about their code or project, IMMEDIATELY call the appropriate tool (like read_file or list_directory) using the function calling format."
+        .. "\nWhen the user asks about their code or project, IMMEDIATELY call the appropriate tool (like neocode__read_file, neocode__list_directory, or neocode__search_files) using the function calling format."
         .. "\nAlways use absolute paths based on the working directory: " .. cwd
         .. "\nBe EFFICIENT with tool calls: read only key files (config, entry points, routes), not every file. Use search_files to find specific patterns instead of reading files one by one. Summarize as you go."
 

@@ -17,7 +17,7 @@ local KEYMAP_LINES = {
   "  ?             Toggle this overlay",
   " ──────────────────────────────────────",
   "  /compact      Summarize conversation",
-  "  MCP tools auto-detected via mcphub",
+  "  Local tools enabled; use @mcp for MCP servers",
   " ──────────────────────────────────────",
   "  Press ? or q to dismiss",
 }

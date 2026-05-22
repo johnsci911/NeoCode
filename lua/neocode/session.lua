@@ -72,10 +72,12 @@ function M._needs_project_tools(text)
     or normalized == "@code" or normalized:match("^@code[%s:]")
     or normalized == "@file" or normalized:match("^@file[%s:]")
     or normalized == "@files" or normalized:match("^@files[%s:]")
+    or normalized == "@mcp" or normalized:match("^@mcp[%s:]")
     or normalized == "/project" or normalized:match("^/project[%s:]")
     or normalized == "/code" or normalized:match("^/code[%s:]")
     or normalized == "/file" or normalized:match("^/file[%s:]")
-    or normalized == "/files" or normalized:match("^/files[%s:]") then
+    or normalized == "/files" or normalized:match("^/files[%s:]")
+    or normalized == "/mcp" or normalized:match("^/mcp[%s:]") then
     return true
   end
 
@@ -122,6 +124,39 @@ function M._needs_project_tools(text)
     or normalized:match("%f[%w]php%f[%W]") ~= nil
     or normalized:match("%f[%w]class%f[%W]") ~= nil
     or normalized:match("%f[%w]function%f[%W]") ~= nil
+end
+
+function M._needs_mcp_tools(text)
+  if type(text) ~= "string" then return false end
+  local normalized = text:lower():gsub("^%s+", "")
+  return normalized == "@mcp" or normalized:match("^@mcp[%s:]") ~= nil
+    or normalized == "/mcp" or normalized:match("^/mcp[%s:]") ~= nil
+end
+
+local function extend_list(dst, src)
+  for _, item in ipairs(src or {}) do
+    table.insert(dst, item)
+  end
+end
+
+function M._build_project_tools(text, cwd)
+  if not (M._needs_project_tools(text) or M._needs_mcp_tools(text)) then return nil end
+
+  local tools = {}
+  local ok_local, local_tools = pcall(require, "neocode.local_tools")
+  if ok_local then
+    extend_list(tools, local_tools.get_tools(cwd))
+  end
+
+  if M._needs_mcp_tools(text) then
+    local ok_mcp, mcp = pcall(require, "neocode.mcp")
+    if ok_mcp and mcp.available() then
+      extend_list(tools, mcp.get_all_tools())
+    end
+  end
+
+  if #tools == 0 then return nil end
+  return tools
 end
 
 local function strip_path_token(path)
@@ -899,11 +934,10 @@ function M._open_api_input(record, config)
         end
       end
 
-      -- Check if MCP tools are available (skip when web search is active to save context)
-      local ok_mcp, mcp = pcall(require, "neocode.mcp")
+      -- Use native local workspace tools by default; MCP is opt-in via @mcp or /mcp.
       local tools = nil
-      if not direct_read_content and not web_search_active and M._needs_project_tools(text) and ok_mcp and mcp.available() then
-        tools = mcp.get_all_tools()
+      if not direct_read_content and not web_search_active then
+        tools = M._build_project_tools(text, record.cwd)
       end
 
       local auto_continue_count = 0
@@ -1014,6 +1048,8 @@ function M._open_api_input(record, config)
       if tools and #tools > 0 then
         -- Use agentic tool-call loop
         local ok_perms, mcp_perms = pcall(require, "neocode.mcp_permissions")
+        local ok_local, local_tools = pcall(require, "neocode.local_tools")
+        local ok_mcp, mcp = pcall(require, "neocode.mcp")
 
         record.job_id = llama.stream_with_tools(record.messages, record.bufnr, on_complete, {
           tools = tools,
@@ -1063,8 +1099,19 @@ function M._open_api_input(record, config)
               return tc
             end
 
-            local function execute()
-              local resolved_tc = resolve_paths(tool_call)
+            local resolved_tc = resolve_paths(tool_call)
+            local resolved_fn = resolved_tc["function"] or {}
+            if ok_local and local_tools.can_handle(resolved_fn.name) then
+              local result, is_error = local_tools.execute(resolved_tc, { cwd = record.cwd })
+              callback(result, is_error)
+              return
+            end
+
+            local function execute_mcp()
+              if not ok_mcp or not mcp.available() then
+                callback("Tool is not available: " .. tostring(resolved_fn.name or "unknown"), true)
+                return
+              end
               mcp.execute_tool_call(resolved_tc, function(result, is_error)
                 if ok_perms then mcp_perms.consume(server, tool_name) end
                 callback(result, is_error)
@@ -1073,20 +1120,20 @@ function M._open_api_input(record, config)
 
             -- Check permissions
             if ok_perms and mcp_perms.is_allowed(server, tool_name) then
-              execute()
+              execute_mcp()
             elseif ok_perms then
               local ok_args, args = pcall(vim.fn.json_decode, fn.arguments or "{}")
               if not ok_args then args = {} end
               mcp_perms.request(server, tool_name, args, function(allowed)
                 if allowed then
                   mcp_perms.save(config)
-                  execute()
+                  execute_mcp()
                 else
                   callback("Permission denied by user", true)
                 end
               end)
             else
-              execute()
+              execute_mcp()
             end
           end,
           on_tool_display = function(tool_call, status, result_text)

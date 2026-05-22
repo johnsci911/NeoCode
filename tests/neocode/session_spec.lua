@@ -27,6 +27,30 @@ describe("session", function()
     end)
   end)
 
+  describe("_needs_mcp_tools", function()
+    it("does not use MCP for ordinary local project prompts", function()
+      assert.is_false(session._needs_mcp_tools("Read README.md and summarize it"))
+      assert.is_false(session._needs_mcp_tools("Search files for routes"))
+    end)
+
+    it("uses MCP only when explicitly requested", function()
+      assert.is_true(session._needs_mcp_tools("@mcp use the github server"))
+      assert.is_true(session._needs_mcp_tools("/mcp list available servers"))
+    end)
+  end)
+
+  describe("_build_project_tools", function()
+    it("selects native local tools for project prompts without MCP", function()
+      local tools = session._build_project_tools("Review this project", "/project")
+      local names = {}
+      for _, schema in ipairs(tools or {}) do
+        table.insert(names, schema["function"].name)
+      end
+
+      assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files" }, names)
+    end)
+  end)
+
   describe("_extract_direct_read_path", function()
     it("extracts an explicit absolute file path from read prompts", function()
       assert.equals(
