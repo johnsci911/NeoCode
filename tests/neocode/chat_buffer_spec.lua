@@ -2,7 +2,7 @@
 describe("chat_buffer", function()
   local chat_buffer = require("neocode.chat_buffer")
 
-  it("renders messages as markdown", function()
+  it("renders messages as boxed markdown blocks", function()
     local messages = {
       { role = "user", content = "What is 2+2?" },
       { role = "assistant", content = "The answer is **4**." },
@@ -12,11 +12,68 @@ describe("chat_buffer", function()
     local found_user = false
     local found_assistant = false
     for _, line in ipairs(lines) do
-      if line:match("^### You") then found_user = true end
-      if line:match("^### Assistant") then found_assistant = true end
+      if line:match("^╭─ You ") then found_user = true end
+      if line:match("^╭─ Assistant ") then found_assistant = true end
     end
     assert.is_true(found_user)
     assert.is_true(found_assistant)
+  end)
+
+  it("keeps fenced code lines unprefixed inside boxed blocks for syntax highlighting", function()
+    local lines = chat_buffer.render_lines({
+      { role = "assistant", content = table.concat({
+        "Here is Lua:",
+        "```lua",
+        "local M = {}",
+        "```",
+      }, "\n") },
+    })
+
+    local text = table.concat(lines, "\n")
+    assert.is_truthy(text:find("╭─ Assistant", 1, true))
+    assert.is_truthy(text:find("```lua", 1, true))
+    assert.is_truthy(text:find("\nlocal M = {}\n", 1, true))
+    assert.is_falsy(text:find("│ local M = {}", 1, true))
+  end)
+
+  it("uses only top and bottom separators without side borders", function()
+    local lines = chat_buffer.render_lines({
+      { role = "assistant", content = "Hello!\n\nHow can I help?" },
+    })
+
+    local text = table.concat(lines, "\n")
+    assert.is_truthy(text:find("╭─ Assistant", 1, true))
+    assert.is_truthy(text:find("╰", 1, true))
+    assert.is_truthy(text:find("\nHello!\n", 1, true))
+    assert.is_truthy(text:find("\nHow can I help?\n", 1, true))
+    assert.is_falsy(text:find("│", 1, true))
+  end)
+
+  it("reports content ranges for message separators", function()
+    local lines, blocks = chat_buffer.render_lines({
+      { role = "user", content = "hello" },
+      { role = "assistant", content = "hi" },
+    }, { metadata = true })
+
+    assert.is_true(#lines > 0)
+    assert.equals(2, #blocks)
+    assert.equals("You", blocks[1].label)
+    assert.equals("Assistant", blocks[2].label)
+    assert.is_true(blocks[1].content_start <= blocks[1].content_end)
+  end)
+
+  it("refresh keeps markdown filetype and highlights separators", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    chat_buffer.refresh(buf, { { role = "assistant", content = "```lua\nlocal M = {}\n```" } })
+
+    assert.equals("markdown", vim.bo[buf].filetype)
+    local marks = vim.api.nvim_buf_get_extmarks(buf, -1, 0, -1, { details = true })
+    assert.is_true(#marks > 0)
+    for _, mark in ipairs(marks) do
+      assert.is_nil(mark[4].virt_text)
+    end
+
+    vim.api.nvim_buf_delete(buf, { force = true })
   end)
 
   it("renders empty messages as empty", function()
@@ -62,6 +119,43 @@ describe("chat_buffer", function()
     assert.is_truthy(text:find("init.lua"))
     -- Tool role messages should be hidden
     assert.is_falsy(text:find("file contents"))
+  end)
+
+  it("renders tool calls when assistant content is nil", function()
+    local lines = chat_buffer.render_lines({
+      {
+        role = "assistant",
+        content = nil,
+        tool_calls = {
+          { id = "1", type = "function", ["function"] = { name = "neocode__list_directory", arguments = '{"path":"."}' } },
+        },
+      },
+    })
+
+    local text = table.concat(lines, "\n")
+    assert.is_truthy(text:find("list_directory", 1, true))
+  end)
+
+  it("renders plain tool result previews without crashing", function()
+    local lines = chat_buffer.render_lines({
+      {
+        role = "assistant",
+        content = "I'll inspect that.",
+        tool_calls = {
+          {
+            id = "1",
+            type = "function",
+            ["function"] = { name = "neocode__list_directory", arguments = '{"path":"."}' },
+            _status = "done",
+            _result_preview = "README.md\nlua\ntests",
+          },
+        },
+      },
+    })
+
+    local text = table.concat(lines, "\n")
+    assert.is_truthy(text:find("README.md", 1, true))
+    assert.is_truthy(text:find("lua", 1, true))
   end)
 
   it("shows correct icons for different tool actions", function()

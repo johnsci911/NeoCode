@@ -80,13 +80,11 @@ function M._needs_project_tools(text)
     or normalized == "@code" or normalized:match("^@code[%s:]")
     or normalized == "@file" or normalized:match("^@file[%s:]")
     or normalized == "@files" or normalized:match("^@files[%s:]")
-    or normalized == "@mcp" or normalized:match("^@mcp[%s:]")
     or normalized == "/project" or normalized:match("^/project[%s:]")
     or normalized == "/code" or normalized:match("^/code[%s:]")
     or normalized == "/file" or normalized:match("^/file[%s:]")
     or normalized == "/files" or normalized:match("^/files[%s:]")
-    or normalized == "/readfile" or normalized:match("^/readfile[%s:]")
-    or normalized == "/mcp" or normalized:match("^/mcp[%s:]") then
+    or normalized == "/readfile" or normalized:match("^/readfile[%s:]") then
     return true
   end
 
@@ -146,13 +144,6 @@ function M._needs_project_tools(text)
     or normalized:match("%f[%w]function%f[%W]") ~= nil
 end
 
-function M._needs_mcp_tools(text)
-  if type(text) ~= "string" then return false end
-  local normalized = text:lower():gsub("^%s+", "")
-  return normalized == "@mcp" or normalized:match("^@mcp[%s:]") ~= nil
-    or normalized == "/mcp" or normalized:match("^/mcp[%s:]") ~= nil
-end
-
 local function extend_list(dst, src)
   for _, item in ipairs(src or {}) do
     table.insert(dst, item)
@@ -162,9 +153,8 @@ end
 function M._build_project_tools(text, cwd)
   local ok_web, web_search = pcall(require, "neocode.web_search")
   local wants_project_tools = M._needs_project_tools(text)
-  local wants_mcp_tools = M._needs_mcp_tools(text)
   local wants_web_tool = ok_web and web_search.needs_search(text)
-  if not (wants_project_tools or wants_mcp_tools or wants_web_tool) then return nil end
+  if not (wants_project_tools or wants_web_tool) then return nil end
 
   local tools = {}
   local ok_local, local_tools = pcall(require, "neocode.local_tools")
@@ -172,15 +162,8 @@ function M._build_project_tools(text, cwd)
     extend_list(tools, local_tools.get_tools(cwd))
   end
 
-  if ok_web and (wants_project_tools or wants_web_tool) then
+  if ok_web and wants_web_tool then
     table.insert(tools, web_search.get_tool())
-  end
-
-  if wants_mcp_tools then
-    local ok_mcp, mcp = pcall(require, "neocode.mcp")
-    if ok_mcp and mcp.available() then
-      extend_list(tools, mcp.get_all_tools())
-    end
   end
 
   if #tools == 0 then return nil end
@@ -601,11 +584,6 @@ function M.create_api(adapter, title, config)
     end
   end)
 
-  -- Load MCP permissions
-  local ok_perms, mcp_perms = pcall(require, "neocode.mcp_permissions")
-  if ok_perms then
-    mcp_perms.load(config)
-  end
 end
 
 -- Resume a saved API session by loading its messages from disk.
@@ -706,11 +684,6 @@ function M.resume_api(adapter, session_data, config)
       pcall(function() require("render-markdown").buf_attach(buf) end)
     end
   end)
-
-  local ok_perms, mcp_perms = pcall(require, "neocode.mcp_permissions")
-  if ok_perms then
-    mcp_perms.load(config)
-  end
 
   local msg_count = #record.messages
   vim.notify("neocode: resumed session '" .. record.title .. "' (" .. msg_count .. " messages)", vim.log.levels.INFO)
@@ -1092,7 +1065,7 @@ function M._open_api_input(record, config)
         end
       end
 
-      -- Use native local workspace tools by default; MCP is opt-in via @mcp or /mcp.
+      -- Use native local workspace tools for project prompts.
       local tools = nil
       if not direct_read_content and not web_search_active then
         tools = M._build_project_tools(text, record.cwd)
@@ -1209,16 +1182,13 @@ function M._open_api_input(record, config)
 
       if tools and #tools > 0 then
         -- Use agentic tool-call loop
-        local ok_perms, mcp_perms = pcall(require, "neocode.mcp_permissions")
         local ok_local, local_tools = pcall(require, "neocode.local_tools")
-        local ok_mcp, mcp = pcall(require, "neocode.mcp")
 
         record.job_id = llama.stream_with_tools(record.messages, record.bufnr, on_complete, {
           tools = tools,
           cwd = record.cwd,
           on_tool_call = function(tool_call, callback)
             local fn = tool_call["function"] or {}
-            local server = (fn.name or ""):match("^(.-)__") or "unknown"
             local tool_name = (fn.name or ""):match("__(.+)$") or fn.name or "unknown"
 
             spinner_phase = "tool"
@@ -1287,34 +1257,7 @@ function M._open_api_input(record, config)
               return
             end
 
-            local function execute_mcp()
-              if not ok_mcp or not mcp.available() then
-                callback("Tool is not available: " .. tostring(resolved_fn.name or "unknown"), true)
-                return
-              end
-              mcp.execute_tool_call(resolved_tc, function(result, is_error)
-                if ok_perms then mcp_perms.consume(server, tool_name) end
-                callback(result, is_error)
-              end)
-            end
-
-            -- Check permissions
-            if ok_perms and mcp_perms.is_allowed(server, tool_name) then
-              execute_mcp()
-            elseif ok_perms then
-              local ok_args, args = pcall(vim.fn.json_decode, fn.arguments or "{}")
-              if not ok_args then args = {} end
-              mcp_perms.request(server, tool_name, args, function(allowed)
-                if allowed then
-                  mcp_perms.save(config)
-                  execute_mcp()
-                else
-                  callback("Permission denied by user", true)
-                end
-              end)
-            else
-              execute_mcp()
-            end
+            callback("Tool is not available: " .. tostring(resolved_fn.name or "unknown"), true)
           end,
           on_tool_display = function(tool_call, status, result_text)
             -- Update tool call status and store result preview
@@ -1365,14 +1308,14 @@ function M._open_api_input(record, config)
           end,
         })
       else
-        -- No MCP tools: use normal streaming
+        -- No tools: use normal streaming
         record.job_id = llama.stream(record.messages, record.bufnr, function(response_text, stats)
           on_complete(response_text, stats, nil)
         end)
       end
     end
 
-    -- Auto-detect if web search is needed (skip MCP tools when searching)
+    -- Auto-detect if web search is needed.
     if web_search.is_explicit(text) then
       web_search_active = true
       -- Show searching indicator

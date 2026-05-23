@@ -30,15 +30,15 @@ describe("session", function()
     end)
   end)
 
-  describe("_needs_mcp_tools", function()
-    it("does not use MCP for ordinary local project prompts", function()
-      assert.is_false(session._needs_mcp_tools("Read README.md and summarize it"))
-      assert.is_false(session._needs_mcp_tools("Search files for routes"))
+  describe("MCP removal", function()
+    it("does not treat MCP prefixes as project tool requests", function()
+      assert.is_false(session._needs_project_tools("@mcp use the github server"))
+      assert.is_false(session._needs_project_tools("/mcp list available servers"))
     end)
 
-    it("uses MCP only when explicitly requested", function()
-      assert.is_true(session._needs_mcp_tools("@mcp use the github server"))
-      assert.is_true(session._needs_mcp_tools("/mcp list available servers"))
+    it("does not build tools for MCP-only prompts", function()
+      assert.is_nil(session._build_project_tools("@mcp use the github server", "/project"))
+      assert.is_nil(session._build_project_tools("/mcp list available servers", "/project"))
     end)
   end)
 
@@ -50,7 +50,7 @@ describe("session", function()
         table.insert(names, schema["function"].name)
       end
 
-      assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files", "neocode__web_search" }, names)
+      assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files" }, names)
     end)
 
     it("offers web search as a model-chosen tool for current-info prompts", function()
@@ -65,7 +65,17 @@ describe("session", function()
         table.insert(names, schema["function"].name)
       end
 
-      assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files", "neocode__web_search" }, names)
+      assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files" }, names)
+    end)
+
+    it("keeps README update prompts on local tools", function()
+      local tools = session._build_project_tools("update the README with setup notes", "/project")
+      local names = {}
+      for _, schema in ipairs(tools or {}) do
+        table.insert(names, schema["function"].name)
+      end
+
+      assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files" }, names)
     end)
   end)
 

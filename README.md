@@ -5,9 +5,9 @@ A simple Neovim plugin that wraps AI CLIs with additional features:
 - **Visible multi-line input** — compose prompts in a floating editor, not a single terminal line
 - **Paste images from clipboard** — send screenshots and diagrams straight to the AI
 - **Native session keymaps** — open, resume, and manage CLI sessions without leaving Neovim
-- **Local LLM support** — chat with local models via llama-server (llama.cpp)
-- **MCP tool calling** — read files, search code, execute commands via mcphub.nvim
-- **Web search** — auto-detect queries and search DuckDuckGo for current info
+- **Local LLM support** — launch Continue CLI for local models configured in Continue
+- **Native local tools** — read files, list directories, and search code from NeoCode API sessions
+- **Web search** — explicit/current-info DuckDuckGo search without hijacking local project prompts
 - **Project context** — auto-reads .neocode.md, CLAUDE.md, .cursorrules, README.md, and more
 - **Session persistence** — save, resume, and manage conversation history
 
@@ -31,7 +31,7 @@ No fancy UI, just plain simple native AI CLI experience inside Neovim.
 }
 ```
 
-### With Local LLM (llama.cpp)
+### With Local LLM (Continue CLI)
 
 ```lua
 {
@@ -40,7 +40,8 @@ No fancy UI, just plain simple native AI CLI experience inside Neovim.
   config = function()
     local llama = require("neocode.adapters.llama")
     llama.setup({
-      base_url = "http://localhost:8080",
+      -- Optional: defaults to `cn`. Keep model/provider settings in Continue.
+      command = "cn",
     })
     require("neocode").setup({
       default_adapter = "claude",
@@ -53,115 +54,32 @@ No fancy UI, just plain simple native AI CLI experience inside Neovim.
 }
 ```
 
-Start llama-server:
+Configure your running local LLM in Continue, not NeoCode. For an OpenAI-compatible local server such as `llama-server`, use `~/.continue/config.yaml`:
 
-```bash
-llama-server --hf-repo <model-repo> -ngl 99 -c 32768 --host 0.0.0.0 --port 8080
+```yaml
+name: Local Llama
+version: 1.0.0
+schema: v1
+models:
+  - name: Local Llama
+    provider: openai
+    model: <your-model-id>
+    apiBase: http://127.0.0.1:8080/v1
+    roles:
+      - chat
+      - edit
+      - apply
 ```
 
-#### Tested model — agentic tool calling (recommended, no vision)
-
-```bash
-VK_ICD_FILENAMES="$(brew --prefix molten-vk)/share/vulkan/icd.d/MoltenVK_icd.json" \
-./build-vulkan/bin/llama-server \
-  --hf-repo unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF \
-  --hf-file Qwen3-Coder-30B-A3B-Instruct-UD-Q3_K_XL.gguf \
-  --n-cpu-moe 20 \
-  -ngl 99 \
-  -c 40960 \
-  -b 128 \
-  -ub 64 \
-  --cache-ram 4096 \
-  --host 127.0.0.1 \
-  --port 8080 \
-  -fa off \
-  --jinja \
-  -np 1
-```
-
-Most stable no-vision setup tested on AMD Vulkan / MoltenVK: Vulkan-only llama.cpp build, MoltenVK ICD pinned explicitly, 40k context, Flash Attention off, and enough MoE layers on CPU to keep VRAM pressure predictable. Native tool calling via Qwen3-Coder's jinja template — no Hermes 2 Pro fallback. Text-only: no vision support.
-
-Tested as the most stable no-vision local coding model on an RX 6900 XT / i5-12400 / 32 GB RAM / macOS (MoltenVK) setup.
-
-**VRAM tuning knob** — `--n-cpu-moe N` offloads the first N of the model's 48 MoE expert layers to system RAM, freeing ~150 MB of VRAM per layer at the cost of roughly 1 t/s of decode speed. On 16GB VRAM the sweet spot is `3`–`6`:
-
-| `--n-cpu-moe` | VRAM headroom | Decode speed | Notes |
-|---|---|---|---|
-| `0` (or omit) | ~1.4 GB | ~35 t/s | Tight — risks OS lag when macOS pressures GPU |
-| `3` | ~2.0 GB | ~24 t/s | Fast, but less headroom than the current stability profile |
-| `6` | ~2.7 GB | ~22 t/s | More room for browser + Electron apps |
-| `12` | ~4.0 GB | ~18 t/s | Very conservative |
-| `20` | More conservative | Slower | **Current stability profile** for 40k context on this setup |
-| `--cpu-moe` (all) | ~11.2 GB | ~12 t/s | All experts on CPU, maximum headroom |
-
-If you run into OS stuttering or VRAM pressure from other GPU-using apps, raise `--n-cpu-moe` until `Free VRAM` in your GPU monitor stays above ~1 GB during sustained prefill.
-
-#### Tested model — with vision
-
-```bash
-llama-server \
-  --hf-repo Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF \
-  --hf-file Qwen3.5-9B.Q8_0.gguf \
-  --mmproj ~/llama.cpp/models/mmproj-BF16.gguf \
-  -ngl 99 -c 32768 --host 0.0.0.0 --port 8080 \
-  --temp 0.6 --top-p 0.85 --top-k 30 --min-p 0.05 --repeat-penalty 1.1
-```
-
-> Download the mmproj separately: `hf download Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF mmproj-BF16.gguf --local-dir ~/llama.cpp/models/`
->
-> Note: this is a hybrid SSM/attention architecture, so KV cache truncation fails between agentic tool-loop rounds, making multi-round tool use much slower. Prefer the Qwen3-Coder model above for codebase review / tool-heavy tasks, and switch to this one only when you need vision.
-
-#### AMD GPU (Vulkan) note
-
-If you're on AMD with Vulkan (e.g. RX 6900 XT via MoltenVK on macOS), use llama.cpp build **b6241** for stable Vulkan support. Newer builds may have Vulkan regressions.
-
-```bash
-cd llama.cpp
-git checkout b6241
-cmake -B build && cmake --build build --config Release
-```
-
-#### Other recommended models
-
-| Model | Size | VRAM | Vision | Tool Calling | Notes |
-|-------|------|------|--------|-------------|-------|
-| **Qwen3-Coder-30B-A3B (MoE)** | 30B/3B active | ~14GB (Q3) | No | Native | **Most stable no-vision setup with Vulkan/MoltenVK, `--n-cpu-moe 20`, 40k context, Flash Attention off** |
-| Qwen3.5-9B-Claude-Distilled (Q8) | 9B | ~9GB | Yes | Generic | Tested, works with vision (hybrid SSM, slower for tool loops) |
-| Qwen3-14B | 14B | ~9GB (Q4) | No | Native | Strong coding + tools |
-| Qwen3-VL-8B-Thinking | 8B | ~7GB (Q4) | Yes | Generic | Best vision + thinking |
-| Devstral Vision Small 2507 | 24B | ~14GB (Q4) | Yes | Yes | Coding + vision + tools, tight fit |
-
-### With MCP Tools (mcphub.nvim)
-
-Add [mcphub.nvim](https://github.com/ravitemer/mcphub.nvim) to your plugins and NeoCode auto-detects it:
+If you keep Continue config somewhere else, pass only Continue CLI arguments through NeoCode:
 
 ```lua
-{
-  "ravitemer/mcphub.nvim",
-  dependencies = { "nvim-lua/plenary.nvim" },
-  build = "npm install -g mcp-hub@latest",
-  config = function()
-    require("mcphub").setup()
-  end,
-}
+llama.setup({
+  args = { "--config", vim.fn.expand("~/.continue/config.yaml") },
+})
 ```
 
-Configure MCP servers in `~/.config/mcphub/servers.json`:
-
-```json
-{
-  "mcpServers": {
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/dir"]
-    },
-    "fetch": {
-      "command": "npx",
-      "args": ["-y", "@anthropic/mcp-server-fetch"]
-    }
-  }
-}
-```
+NeoCode only opens the Continue terminal session. Continue handles model selection, roles, prompts, tools, completion options, and provider details.
 
 ### Requirements
 
@@ -170,29 +88,28 @@ Configure MCP servers in `~/.config/mcphub/servers.json`:
 - [telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) *(optional — falls back to `vim.ui.select`)*
 - [render-markdown.nvim](https://github.com/MeanderingProgrammer/render-markdown.nvim) *(optional — renders chat with proper markdown)*
 - `pngpaste` (macOS) or `wl-paste` / `xclip` (Linux) for image paste
-- [llama.cpp](https://github.com/ggml-org/llama.cpp) for local LLM support
-- [mcphub.nvim](https://github.com/ravitemer/mcphub.nvim) for MCP tool calling *(optional)*
+- [Continue CLI](https://docs.continue.dev/cli/) (`cn`) for local LLM support
 
 ## Features
 
-### Local LLM via llama-server
+### Local LLM via Continue CLI
 
-- Auto-detect model name from running server
-- Streaming responses with live t/s and context usage
-- Thinking content displayed as blockquotes
-- Degenerate output detection (stops gibberish)
-- Auto-continue truncated responses (up to 3 retries)
-- Connection failure detection with helpful error messages
+- `Llama (Local)` launches Continue CLI (`cn`) in a NeoCode terminal session
+- Continue owns local model configuration through `~/.continue/config.yaml`
+- NeoCode does not duplicate provider, prompt, tool, sampling, or role customization
 
-### MCP Tool Calling
+### Local Tool Calling
 
-- Auto-detects mcphub.nvim and available MCP servers
-- Claude Code-style permission system (Allow once / session / always / deny)
-- Tool call display with result previews (first 6 lines shown)
-- Action-aware icons: 📖 read, ✏️ write, ⚡ execute, 📄 resource, 📋 prompt
-- Agentic loop: model calls tools, gets results, calls more tools, gives final answer
-- Parses structured tool_calls, `<tool_call>` XML, and bare JSON formats
-- Path resolution: relative paths and hallucinated `/home/user/` paths auto-fixed
+NeoCode API sessions can expose three native workspace tools for project prompts:
+
+- `neocode__read_file` — read one text file inside the workspace
+- `neocode__list_directory` — list files in a workspace directory
+- `neocode__search_files` — search workspace text files
+
+NeoCode keeps web search separate from the local hot path:
+
+- README/project/file prompts get local tools, not web search.
+- `/websearch` and `@web` force web search.
 
 ### Project Context
 
@@ -220,7 +137,7 @@ When no instruction files exist, auto-detects:
 ### Web Search
 
 - `/websearch` prefix forces a web search before the model responds
-- For ordinary prompts, web search is exposed as a model-selectable tool when the prompt looks like it may need current or external information
+- For ordinary prompts, web search is exposed as a model-selectable tool only when the prompt looks like it may need current or external information
 - DuckDuckGo search via Python `ddgs` package (auto-installs)
 - `@web` prefix also forces a search
 - Results injected as context for the model
@@ -304,20 +221,17 @@ require("neocode").setup({
 })
 ```
 
-### Llama adapter options
+### Llama (Local) adapter options
 
 ```lua
 local llama = require("neocode.adapters.llama")
 llama.setup({
-  base_url       = "http://localhost:8080",  -- llama-server URL
-  temperature    = 0.6,    -- creativity (0.0-2.0)
-  top_p          = 0.85,   -- nucleus sampling
-  repeat_penalty = 1.1,    -- repetition penalty
-  max_tokens     = 16384,  -- max output tokens
-  max_messages   = 30,     -- conversation history limit
-  context_size   = 32768,  -- for context usage display
+  command = "cn", -- Continue CLI executable
+  args = {},      -- optional Continue CLI args, e.g. { "--config", "~/.continue/config.yaml" }
 })
 ```
+
+Put model/provider settings in Continue's config, not here.
 
 ## Adding a CLI Adapter
 
@@ -366,10 +280,10 @@ require("neocode").setup({
 
 NeoCode supports two adapter types:
 
-**CLI adapters** (Claude, OpenCode) spawn each AI CLI as a Neovim terminal job. The CLI owns its own rendering and session history — NeoCode only manages the window lifecycle and keymaps.
+**CLI adapters** (Claude, OpenCode, Llama/Continue) spawn each AI CLI as a Neovim terminal job. The CLI owns its own rendering and session history — NeoCode only manages the window lifecycle and keymaps.
 
-**API adapters** (Llama) communicate with a local LLM server via the OpenAI-compatible API. NeoCode handles message management, streaming, tool calling, and rendering in a markdown buffer.
+**API adapters** communicate with model APIs directly. NeoCode handles message management, streaming, local tool calling, and rendering in a markdown buffer.
 
-MCP tools are auto-detected from mcphub.nvim when available. The model can call tools to read files, search code, list directories, and execute commands. A permission system (Allow once / session / always) controls tool access.
+API adapter project prompts expose NeoCode's native read/list/search tools. Web search is exposed only for explicit or current-info prompts. Continue CLI sessions own their own tool setup through Continue config.
 
 Images are saved to a temp file under `data_dir/images/`, sent to the CLI or API, and cleaned up when the session closes.

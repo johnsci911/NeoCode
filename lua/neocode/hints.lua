@@ -21,7 +21,7 @@ local KEYMAP_LINES = {
   "  /rename NAME  Rename current session",
   "  /readfile PATH Read exact local file",
   "  /websearch Q  Search web explicitly",
-  "  Local tools enabled; use @mcp for MCP servers",
+  "  Local tools enabled for project prompts",
   " ──────────────────────────────────────",
   "  Press ? or q to dismiss",
 }

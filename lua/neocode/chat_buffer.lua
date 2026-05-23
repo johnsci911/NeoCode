@@ -1,22 +1,34 @@
 -- lua/neocode/chat_buffer.lua
 local M = {}
 
+local NS = vim.api.nvim_create_namespace("neocode_chat_blocks")
+
 local ROLE_HEADERS = {
-  user = "### You",
-  assistant = "### Assistant",
-  system = "### System",
+  user = "You",
+  assistant = "Assistant",
+  system = "System",
 }
 
+local BOX_WIDTH = 78
+
+local function border(label, top)
+  local left = top and "╭─ " or "╰─ "
+  local title = top and (label .. " ") or ""
+  local used = vim.fn.strdisplaywidth(left .. title)
+  local fill = string.rep("─", math.max(1, BOX_WIDTH - used))
+  return left .. title .. fill
+end
+
 -- Detect unified-diff content in a tool result preview and strip the verbose
--- header lines (Index:/===/---/+++) so we render just the hunks. The MCP
--- filesystem server's edit_file returns diffs, and we want them shown inline
+-- header lines (Index:/===/---/+++) so we render just the hunks. Some edit
+-- tools return diffs, and we want them shown inline
 -- with ```diff ``` fences so render-markdown.nvim highlights the +/- lines
 -- instead of burying them under a 2-space indent.
 --
 -- Returns (is_diff, body) — body is the content to render (without the
 -- original ```diff fence if present, and with header lines stripped).
 local function normalize_diff_preview(preview)
-  -- Strip an existing ```diff``` or ```patch``` fence if the MCP server added one
+  -- Strip an existing ```diff``` or ```patch``` fence if a tool added one
   local stripped = preview
   local had_fence = preview:match("^```diff") or preview:match("^```patch")
   if had_fence then
@@ -47,10 +59,35 @@ local function normalize_diff_preview(preview)
   return true, table.concat(hunks, "\n")
 end
 
--- Convert a messages array into lines of markdown text.
-function M.render_lines(messages)
+local function append_block(lines, blocks, label, body)
+  if #body == 0 then return end
+
+  if #lines > 0 then table.insert(lines, "") end
+  local top_line = #lines + 1
+  table.insert(lines, border(label, true))
+  local content_start = #lines + 1
+  for _, raw_line in ipairs(body) do
+    table.insert(lines, raw_line or "")
+  end
+  local content_end = #lines
+  table.insert(lines, border(label, false))
+  table.insert(blocks, {
+    label = label,
+    top = top_line,
+    content_start = content_start,
+    content_end = content_end,
+    bottom = #lines,
+  })
+end
+
+-- Convert a messages array into boxed markdown text. The actual buffer lines
+-- inside each box are left as plain markdown so fenced code blocks can still be
+-- highlighted by Neovim/Tree-sitter/render-markdown. Side borders are drawn as
+-- virtual text in refresh().
+function M.render_lines(messages, opts)
   if #messages == 0 then return {} end
   local lines = {}
+  local blocks = {}
   local prev_visible_role = nil
 
   for _, msg in ipairs(messages) do
@@ -73,13 +110,7 @@ function M.render_lines(messages)
       show_header = false
     end
 
-    if show_header then
-      table.insert(lines, "")
-      table.insert(lines, ROLE_HEADERS[msg.role] or ("### " .. msg.role))
-      if has_text then
-        table.insert(lines, "")
-      end
-    end
+    local body = {}
 
     prev_visible_role = msg.role
 
@@ -94,16 +125,16 @@ function M.render_lines(messages)
       content = content:gsub("</think>", "\n\n")
       for line in (content .. "\n"):gmatch("([^\n]*)\n") do
         -- Indent lines between thinking markers as blockquotes
-        table.insert(lines, line)
+        table.insert(body, line)
       end
     elseif type(msg.content) == "table" then
       for _, part in ipairs(msg.content) do
         if part.type == "text" then
           for line in (part.text .. "\n"):gmatch("([^\n]*)\n") do
-            table.insert(lines, line)
+            table.insert(body, line)
           end
         elseif part.type == "image_url" then
-          table.insert(lines, "*[image]*")
+          table.insert(body, "*[image]*")
         end
       end
     end
@@ -126,10 +157,6 @@ function M.render_lines(messages)
           icon = "🗑️"
         elseif lower:match("run") or lower:match("exec") or lower:match("shell") or lower:match("command") then
           icon = "⚡"
-        elseif name:match("^mcp_resource__") then
-          icon = "📄"
-        elseif name:match("^mcp_prompt__") then
-          icon = "📋"
         end
 
         -- Build args for header
@@ -150,11 +177,11 @@ function M.render_lines(messages)
           or ""
 
         -- Tool header line (like Claude Code)
-        table.insert(lines, "")
+        if #body > 0 then table.insert(body, "") end
         if args_summary ~= "" then
-          table.insert(lines, string.format("%s **%s**(%s)%s", icon, display, args_summary, status_icon))
+          table.insert(body, string.format("%s **%s**(%s)%s", icon, display, args_summary, status_icon))
         else
-          table.insert(lines, string.format("%s **%s**%s", icon, display, status_icon))
+          table.insert(body, string.format("%s **%s**%s", icon, display, status_icon))
         end
 
         -- Result preview (first few lines of output).
@@ -162,13 +189,13 @@ function M.render_lines(messages)
         -- (un-indented) so render-markdown.nvim highlights +/- lines; for
         -- plain output, keep the 6-line / 2-space-indent layout.
         if tc._result_preview and tc._result_preview ~= "" and tc._result_preview ~= "(empty result)" then
-          local is_diff, body = normalize_diff_preview(tc._result_preview)
+          local is_diff, preview_body = normalize_diff_preview(tc._result_preview)
           local max_preview = is_diff and 20 or 6
           local indent = is_diff and "" or "  "
 
           local preview_lines = {}
           local total_lines = 0
-          for pline in (body .. "\n"):gmatch("([^\n]*)\n") do
+          for pline in (preview_body .. "\n"):gmatch("([^\n]*)\n") do
             total_lines = total_lines + 1
             if #preview_lines < max_preview then
               table.insert(preview_lines, indent .. pline)
@@ -176,22 +203,22 @@ function M.render_lines(messages)
           end
 
           if is_diff then
-            table.insert(lines, "```diff")
+            table.insert(body, "```diff")
             for _, pl in ipairs(preview_lines) do
-              table.insert(lines, pl)
+              table.insert(body, pl)
             end
-            table.insert(lines, "```")
+            table.insert(body, "```")
           else
             for _, pl in ipairs(preview_lines) do
-              table.insert(lines, pl)
+              table.insert(body, pl)
             end
           end
 
           if total_lines > max_preview then
-            table.insert(lines, string.format("%s*...%d more lines*", indent, total_lines - max_preview))
+            table.insert(body, string.format("%s*...%d more lines*", indent, total_lines - max_preview))
           end
         elseif status == "error" and tc._result_preview then
-          table.insert(lines, "  " .. tc._result_preview)
+          table.insert(body, "  " .. tc._result_preview)
         end
       end
     end
@@ -199,7 +226,7 @@ function M.render_lines(messages)
     -- Show stats/done indicator for completed assistant messages
     if msg.role == "assistant" and msg._stats then
       local s = msg._stats
-      table.insert(lines, "")
+      if #body > 0 then table.insert(body, "") end
       local parts = {}
       if s.model then table.insert(parts, s.model) end
       local tokens = s.completion_tokens or s.tokens or 0
@@ -222,29 +249,45 @@ function M.render_lines(messages)
         table.insert(parts, string.format("ctx: %d/%d (%d%%)", used, ctx_max, pct))
       end
       if #parts > 0 then
-        table.insert(lines, "✅ " .. table.concat(parts, " · "))
+        table.insert(body, "✅ " .. table.concat(parts, " · "))
       else
-        table.insert(lines, "✅ Done")
+        table.insert(body, "✅ Done")
       end
     end
 
-    -- Only add separator for messages with visible content
-    if has_text or has_stats then
-      table.insert(lines, "")
-      table.insert(lines, "---")
+    local label = ROLE_HEADERS[msg.role] or msg.role
+    if not show_header and msg.role == "assistant" then
+      label = "Assistant"
+    end
+    if #body > 0 then
+      append_block(lines, blocks, label, body)
     end
     ::continue::
   end
+  if opts and opts.metadata then return lines, blocks end
   return lines
+end
+
+function M._apply_block_decorations(bufnr, blocks)
+  vim.api.nvim_buf_clear_namespace(bufnr, NS, 0, -1)
+  for _, block in ipairs(blocks or {}) do
+    if block.top then
+      vim.api.nvim_buf_add_highlight(bufnr, NS, "NeoCodeBlockBorder", block.top - 1, 0, -1)
+    end
+    if block.bottom then
+      vim.api.nvim_buf_add_highlight(bufnr, NS, "NeoCodeBlockBorder", block.bottom - 1, 0, -1)
+    end
+  end
 end
 
 -- Create or update a buffer with rendered messages.
 function M.refresh(bufnr, messages)
-  local lines = M.render_lines(messages)
+  local lines, blocks = M.render_lines(messages, { metadata = true })
   vim.bo[bufnr].modifiable = true
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
   vim.bo[bufnr].modifiable = false
   vim.bo[bufnr].filetype = "markdown"
+  M._apply_block_decorations(bufnr, blocks)
   return bufnr
 end
 

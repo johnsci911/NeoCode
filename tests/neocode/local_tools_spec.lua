@@ -28,6 +28,10 @@ describe("local workspace tools", function()
     assert.is_not_nil(schemas[1]["function"].parameters.properties.path)
   end)
 
+  it("does not claim non-local neocode tools", function()
+    assert.is_false(local_tools.can_handle("neocode__web_search"))
+  end)
+
   it("reads files relative to the workspace root", function()
     local result, is_error = local_tools.execute({
       ["function"] = {

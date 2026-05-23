@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark local file-read prompts against llama.cpp without NeoCode/MCP.
+"""Benchmark local file-read prompts against llama.cpp without NeoCode.
 
 Default mode is a safe dry run: it reads files, builds the request prompt, and
 prints payload stats, but it does not contact llama-server unless --live is set.

@@ -1,24 +1,41 @@
 local llama = require("neocode.adapters.llama")
 
-describe("llama adapter text tool-call parsing", function()
-  it("parses Claude-style XML function calls", function()
-    local text = table.concat({
-      "Yes, I can read this project.",
-      "",
-      "<function=filesystem__list_directory>",
-      "<parameter=path>",
-      "/Users/johnkarlo/Desktop/NeoCode",
-      "</parameter>",
-      "</function>",
-    }, "\n")
+describe("llama adapter", function()
+  before_each(function()
+    llama.setup({})
+  end)
 
-    local clean_text, tool_calls = llama._parse_text_tool_calls(text)
+  it("launches Continue CLI as a normal terminal adapter", function()
+    assert.equals("llama", llama.name)
+    assert.is_nil(llama.type)
+    assert.is_true(llama.session_store)
+    assert.is_function(llama.launch_cmd)
+    assert.is_function(llama.interrupt)
+    assert.is_function(llama.attach_image)
+  end)
 
-    assert.equals("Yes, I can read this project.", clean_text)
-    assert.equals(1, #tool_calls)
-    assert.equals("filesystem__list_directory", tool_calls[1]["function"].name)
+  it("uses cn by default and lets Continue own the local model configuration", function()
+    local spec = llama.launch_cmd({ cwd = "/tmp/project", name = "Llama Local" })
 
-    local args = vim.fn.json_decode(tool_calls[1]["function"].arguments)
-    assert.equals("/Users/johnkarlo/Desktop/NeoCode", args.path)
+    assert.equals("cn", spec.cmd)
+    assert.same({}, spec.args)
+    assert.equals("/tmp/project", spec.cwd)
+    assert.is_nil(spec.env)
+  end)
+
+  it("allows users to point at a different Continue CLI command without model flags", function()
+    llama.setup({ command = "continue", args = { "--config", "/tmp/continue.yaml" } })
+
+    local spec = llama.launch_cmd({ cwd = "/tmp/project" })
+
+    assert.equals("continue", spec.cmd)
+    assert.same({ "--config", "/tmp/continue.yaml" }, spec.args)
+  end)
+
+  it("does not expose the previous NeoCode-owned OpenAI API customization surface", function()
+    assert.is_nil(llama.stream)
+    assert.is_nil(llama.stream_with_tools)
+    assert.is_nil(llama._build_system_prompt)
+    assert.is_nil(llama._parse_text_tool_calls)
   end)
 end)

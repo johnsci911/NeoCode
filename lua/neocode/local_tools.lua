@@ -147,7 +147,9 @@ function M.get_tools()
 end
 
 function M.can_handle(name)
-  return type(name) == "string" and name:match("^neocode__") ~= nil
+  return name == "neocode__read_file"
+    or name == "neocode__list_directory"
+    or name == "neocode__search_files"
 end
 
 local function parse_args(tool_call)
