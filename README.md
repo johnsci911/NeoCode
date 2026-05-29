@@ -81,6 +81,26 @@ llama.setup({
 
 NeoCode only opens the Continue terminal session. Continue handles model selection, roles, prompts, tools, completion options, and provider details.
 
+### With OpenCode
+
+```lua
+{
+  "johnsci911/NeoCode",
+  dependencies = { "nvim-lua/plenary.nvim", "nvim-telescope/telescope.nvim" },
+  config = function()
+    require("neocode").setup({
+      default_adapter = "claude",
+      adapters = {
+        claude = require("neocode.adapters.claude"),
+        opencode = require("neocode.adapters.opencode"),
+      },
+    })
+  end,
+}
+```
+
+OpenCode runs as its own terminal UI. NeoCode adds the same floating multi-line input window (`i`) used by Claude CLI, then sends the composed prompt into the OpenCode terminal session.
+
 ### Requirements
 
 - Neovim >= 0.9
@@ -89,6 +109,7 @@ NeoCode only opens the Continue terminal session. Continue handles model selecti
 - [render-markdown.nvim](https://github.com/MeanderingProgrammer/render-markdown.nvim) *(optional — renders chat with proper markdown)*
 - `pngpaste` (macOS) or `wl-paste` / `xclip` (Linux) for image paste
 - [Continue CLI](https://docs.continue.dev/cli/) (`cn`) for local LLM support
+- [OpenCode](https://opencode.ai/) (`opencode`) for OpenCode sessions
 
 ## Features
 
