@@ -32,6 +32,80 @@ describe("llama adapter", function()
     assert.same({ "--config", "/tmp/continue.yaml" }, spec.args)
   end)
 
+  it("extracts model and runtime context from llama-server metadata", function()
+    local metadata = llama._metadata_from_responses({
+      model_alias = "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF",
+      default_generation_settings = { n_ctx = 24576 },
+    }, {
+      data = {
+        {
+          id = "fallback-model",
+          meta = { n_ctx = 1234, n_ctx_train = 262144 },
+        },
+      },
+    })
+
+    assert.equals("unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF", metadata.model)
+    assert.equals(24576, metadata.context_length)
+    assert.equals(262144, metadata.training_context_length)
+  end)
+
+  it("builds a Continue config from detected llama-server metadata", function()
+    local yaml = llama._build_continue_config({
+      model = "local-model",
+      context_length = 24576,
+    }, {
+      name = "Generated Local Llama",
+      api_base = "http://127.0.0.1:8080/v1",
+      max_tokens = 3500,
+    })
+
+    assert.is_truthy(yaml:find("name: Generated Local Llama", 1, true))
+    assert.is_truthy(yaml:find("model: local-model", 1, true))
+    assert.is_truthy(yaml:find("apiBase: http://127.0.0.1:8080/v1", 1, true))
+    assert.is_truthy(yaml:find("contextLength: 24576", 1, true))
+    assert.is_truthy(yaml:find("maxTokens: 3500", 1, true))
+  end)
+
+  it("launches Continue with a generated config when dynamic setup succeeds", function()
+    local tmp = vim.fn.tempname()
+    llama.setup({
+      dynamic_continue_config = {
+        enabled = true,
+        output = tmp,
+        probe = function()
+          return { model = "local-model", context_length = 24576 }
+        end,
+      },
+    })
+
+    local spec = llama.launch_cmd({ cwd = "/tmp/project" })
+
+    assert.same({ "--config", tmp }, spec.args)
+    assert.equals(1, vim.fn.filereadable(tmp))
+    assert.is_truthy(table.concat(vim.fn.readfile(tmp), "\n"):find("contextLength: 24576", 1, true))
+    vim.fn.delete(tmp)
+  end)
+
+  it("preserves extra Continue CLI args when injecting generated config", function()
+    local tmp = vim.fn.tempname()
+    llama.setup({
+      args = { "--verbose", "--config", "/old/config.yaml", "--trace" },
+      dynamic_continue_config = {
+        enabled = true,
+        output = tmp,
+        probe = function()
+          return { model = "local-model", context_length = 24576 }
+        end,
+      },
+    })
+
+    local spec = llama.launch_cmd({ cwd = "/tmp/project" })
+
+    assert.same({ "--verbose", "--trace", "--config", tmp }, spec.args)
+    vim.fn.delete(tmp)
+  end)
+
   it("does not expose the previous NeoCode-owned OpenAI API customization surface", function()
     assert.is_nil(llama.stream)
     assert.is_nil(llama.stream_with_tools)

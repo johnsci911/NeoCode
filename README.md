@@ -40,8 +40,13 @@ No fancy UI, just plain simple native AI CLI experience inside Neovim.
   config = function()
     local llama = require("neocode.adapters.llama")
     llama.setup({
-      -- Optional: defaults to `cn`. Keep model/provider settings in Continue.
       command = "cn",
+      -- Optional: generate Continue config from llama-server before launching.
+      dynamic_continue_config = {
+        enabled = true,
+        llama_server = "http://127.0.0.1:8080",
+        max_tokens = 3500,
+      },
     })
     require("neocode").setup({
       default_adapter = "claude",
@@ -54,7 +59,7 @@ No fancy UI, just plain simple native AI CLI experience inside Neovim.
 }
 ```
 
-Configure your running local LLM in Continue, not NeoCode. For an OpenAI-compatible local server such as `llama-server`, use `~/.continue/config.yaml`:
+By default, configure your running local LLM in Continue, not NeoCode. For an OpenAI-compatible local server such as `llama-server`, use `~/.continue/config.yaml`:
 
 ```yaml
 name: Local Llama
@@ -79,7 +84,7 @@ llama.setup({
 })
 ```
 
-NeoCode only opens the Continue terminal session. Continue handles model selection, roles, prompts, tools, completion options, and provider details.
+With the default llama adapter settings, NeoCode only opens the Continue terminal session. Continue handles model selection, roles, prompts, tools, completion options, and provider details.
 
 To make Continue compact around ~20k tokens on a llama-server running with a 24,576 token context, set Continue's own limits:
 
@@ -99,6 +104,21 @@ models:
 ```
 
 Continue CLI owns its live chat history, so NeoCode cannot reliably rewrite or compact a running Continue session from the outside.
+
+Alternatively, enable `dynamic_continue_config` to let NeoCode generate that Continue config at launch time from a running `llama-server`. NeoCode reads `/props` and `/v1/models`, writes a generated config to `stdpath("data") .. "/neocode/continue.generated.yaml"`, then launches `cn --config <generated-file>`:
+
+```lua
+llama.setup({
+  command = "cn",
+  dynamic_continue_config = {
+    enabled = true,
+    llama_server = "http://127.0.0.1:8080",
+    max_tokens = 3500,
+  },
+})
+```
+
+The generated config uses the server's runtime context (`n_ctx`, for example `24576`) rather than the model's training context (`n_ctx_train`). If probing fails because `llama-server` is not running, NeoCode falls back to the adapter's configured `args`. When generation succeeds, NeoCode preserves other Continue CLI args and replaces only an existing `--config` argument with the generated config path.
 
 ### With OpenCode
 
@@ -135,8 +155,8 @@ OpenCode runs as its own terminal UI. NeoCode adds the same floating multi-line 
 ### Local LLM via Continue CLI
 
 - `Llama (Local)` launches Continue CLI (`cn`) in a NeoCode terminal session
-- Continue owns local model configuration through `~/.continue/config.yaml`
-- NeoCode does not duplicate provider, prompt, tool, sampling, or role customization
+- Continue owns local model configuration through `~/.continue/config.yaml` by default
+- Optional `dynamic_continue_config` can generate model/provider/context settings from a running llama-server before launching Continue
 
 ### Local Tool Calling
 
@@ -274,10 +294,16 @@ local llama = require("neocode.adapters.llama")
 llama.setup({
   command = "cn", -- Continue CLI executable
   args = {},      -- optional Continue CLI args, e.g. { "--config", "~/.continue/config.yaml" }
+  dynamic_continue_config = {
+    enabled = false,
+    llama_server = "http://127.0.0.1:8080",
+    output = nil, -- defaults to stdpath("data") .. "/neocode/continue.generated.yaml"
+    max_tokens = 3500,
+  },
 })
 ```
 
-Put model/provider settings in Continue's config, not here.
+Put model/provider settings in Continue's config, or enable `dynamic_continue_config` to generate them from a running llama-server at launch time.
 
 ## Adding a CLI Adapter
 
