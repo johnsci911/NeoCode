@@ -10,6 +10,11 @@ local DEFAULT_CONFIG = {
   telescope_fallback = true,
   winbar             = "  ? help  h resume  i input  R rename  <leader>p image  <C-c> stop  H toggle  { } cycle\n",
   adapters           = {},
+  auto_compact       = {
+    enabled = false,
+    threshold = 0.8,
+    preserve_recent_turns = 4,
+  },
 }
 
 M._config      = {}

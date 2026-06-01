@@ -22,6 +22,22 @@ describe("neocode.setup", function()
     assert.is_not_nil(neocode._config.data_dir)
   end)
 
+  it("provides disabled auto-compaction defaults", function()
+    local dummy = {
+      name          = "dummy",
+      session_store = false,
+      launch_cmd    = function() return { cmd = "true", args = {}, cwd = "/tmp" } end,
+      interrupt     = function() end,
+      attach_image  = function() end,
+    }
+
+    neocode.setup({ adapters = { dummy = dummy } })
+
+    assert.is_false(neocode._config.auto_compact.enabled)
+    assert.equals(0.8, neocode._config.auto_compact.threshold)
+    assert.equals(4, neocode._config.auto_compact.preserve_recent_turns)
+  end)
+
   it("accepts valid config without error", function()
     local claude = require("neocode.adapters.claude")
     assert.has_no_error(function()

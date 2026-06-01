@@ -17,7 +17,7 @@ local KEYMAP_LINES = {
   "  R             Rename current session",
   "  ?             Toggle this overlay",
   " ──────────────────────────────────────",
-  "  /compact      Summarize conversation",
+  "  /compact      Summarize API conversation",
   "  /rename NAME  Rename current session",
   "  /readfile PATH Read exact local file",
   "  /websearch Q  Search web explicitly",

@@ -275,6 +275,113 @@ local function has_user_message(messages)
   return false
 end
 
+local function positive_number(value)
+  return type(value) == "number" and value > 0
+end
+
+function M._auto_compact_context_size(config, record, stats)
+  stats = stats or {}
+  if positive_number(stats.context_size) then return stats.context_size end
+
+  local adapter = record and record.api_adapter
+  local adapter_cfg = adapter and (adapter.config or adapter.defaults)
+  if adapter_cfg then
+    if positive_number(adapter_cfg.context_size) then return adapter_cfg.context_size end
+    if positive_number(adapter_cfg.context_length) then return adapter_cfg.context_length end
+  end
+
+  local auto_cfg = config and config.auto_compact
+  if auto_cfg then
+    if positive_number(auto_cfg.context_size) then return auto_cfg.context_size end
+    if positive_number(auto_cfg.context_length) then return auto_cfg.context_length end
+  end
+
+  return nil
+end
+
+function M._auto_compact_used_tokens(stats)
+  stats = stats or {}
+  local prompt_tokens = stats.prompt_tokens
+  if not positive_number(prompt_tokens) and type(stats.usage) == "table" then
+    prompt_tokens = stats.usage.prompt_tokens
+  end
+  if not positive_number(prompt_tokens) then return nil end
+
+  local completion_tokens = stats.completion_tokens
+  if not positive_number(completion_tokens) and type(stats.usage) == "table" then
+    completion_tokens = stats.usage.completion_tokens
+  end
+
+  return prompt_tokens + (positive_number(completion_tokens) and completion_tokens or 0)
+end
+
+function M._should_auto_compact(config, record, stats)
+  local auto_cfg = config and config.auto_compact
+  if not auto_cfg or auto_cfg.enabled ~= true then return false end
+  if record and (record._auto_compact_running or record._auto_compact_pending) then return false end
+
+  local context_size = M._auto_compact_context_size(config, record, stats)
+  local used_tokens = M._auto_compact_used_tokens(stats)
+  if not context_size or not used_tokens then return false end
+
+  local threshold = positive_number(auto_cfg.threshold) and auto_cfg.threshold or 0.8
+  if threshold > 1 then threshold = threshold / context_size end
+  if threshold <= 0 then threshold = 0.8 end
+
+  return used_tokens >= math.floor(context_size * threshold)
+end
+
+function M._mark_auto_compact_if_needed(config, record, stats)
+  if not M._should_auto_compact(config, record, stats) then return false end
+  if not M._compact_endpoint_config(record) then return false end
+
+  record._auto_compact_pending = true
+  record._auto_compact_last_usage = {
+    prompt_tokens = (stats and (stats.prompt_tokens or (stats.usage and stats.usage.prompt_tokens))) or nil,
+    completion_tokens = (stats and (stats.completion_tokens or (stats.usage and stats.usage.completion_tokens))) or nil,
+    used_tokens = M._auto_compact_used_tokens(stats),
+    context_size = M._auto_compact_context_size(config, record, stats),
+  }
+  return true
+end
+
+function M._compact_endpoint_config(record)
+  local adapter = record and record.api_adapter
+  local cfg = adapter and (adapter.config or adapter.defaults)
+  if not cfg or type(cfg.base_url) ~= "string" or cfg.base_url == "" then return nil end
+  if type(cfg.model) ~= "string" or cfg.model == "" then return nil end
+  return cfg
+end
+
+function M._auto_compact_recent_messages(messages, preserve_recent_turns)
+  if not positive_number(preserve_recent_turns) then return {} end
+
+  local kept = {}
+  local user_turns = 0
+  for i = #(messages or {}), 1, -1 do
+    local msg = messages[i]
+    if msg.role == "user" then
+      user_turns = user_turns + 1
+    end
+    if msg.role == "user" or msg.role == "assistant" or msg.role == "tool" then
+      table.insert(kept, 1, vim.deepcopy(msg))
+    end
+    if user_turns >= preserve_recent_turns then break end
+  end
+
+  return kept
+end
+
+function M._auto_compact_messages_to_summarize(messages, preserve_recent_turns)
+  local recent = M._auto_compact_recent_messages(messages, preserve_recent_turns)
+  local limit = #(messages or {}) - #recent
+  local older = {}
+  for i = 1, math.max(limit, 0) do
+    table.insert(older, messages[i])
+  end
+  return older
+end
+
 -- Persistence
 
 local function _sessions_path(config)
@@ -734,12 +841,25 @@ end
 -- Compact session: summarize conversation to free context
 function M._compact_session(record, config)
   local chat_buffer = require("neocode.chat_buffer")
-  local llama = record.api_adapter
+  local cfg = M._compact_endpoint_config(record)
+
+  if not cfg then
+    vim.notify("neocode: compact requires an API adapter with base_url and model", vim.log.levels.WARN)
+    return false
+  end
+
+  record._auto_compact_running = true
+  record._auto_compact_pending = false
 
   if #record.messages < 3 then
+    record._auto_compact_running = false
     vim.notify("neocode: nothing to compact", vim.log.levels.INFO)
     return
   end
+
+  local auto_cfg = config and config.auto_compact or {}
+  local recent_messages = M._auto_compact_recent_messages(record.messages, auto_cfg.preserve_recent_turns or 0)
+  local summary_source_messages = M._auto_compact_messages_to_summarize(record.messages, auto_cfg.preserve_recent_turns or 0)
 
   -- Show compacting indicator
   vim.bo[record.bufnr].modifiable = true
@@ -749,7 +869,7 @@ function M._compact_session(record, config)
 
   -- Build summary request: ask the model to summarize
   local conversation_text = {}
-  for _, msg in ipairs(record.messages) do
+  for _, msg in ipairs(summary_source_messages) do
     if msg.role == "user" and type(msg.content) == "string" then
       table.insert(conversation_text, "User: " .. msg.content)
     elseif msg.role == "assistant" and type(msg.content) == "string" and msg.content ~= "" then
@@ -767,7 +887,6 @@ function M._compact_session(record, config)
     { role = "user", content = table.concat(conversation_text, "\n") },
   }
 
-  local cfg = llama.config or llama.defaults
   local url = cfg.base_url .. "/v1/chat/completions"
   local payload = vim.fn.json_encode({
     model = cfg.model,
@@ -778,17 +897,23 @@ function M._compact_session(record, config)
     enable_thinking = false,
   })
 
-  vim.fn.jobstart({
+  local compact_job_id = vim.fn.jobstart({
     "curl", "--silent",
     "-X", "POST", url,
     "-H", "Content-Type: application/json",
     "-d", payload,
   }, {
     stdout_buffered = true,
+    on_exit = function(_, code)
+      if code ~= 0 then
+        record._auto_compact_running = false
+      end
+    end,
     on_stdout = function(_, data)
       vim.schedule(function()
         local raw = table.concat(data or {}, "")
         if raw == "" then
+          record._auto_compact_running = false
           vim.notify("neocode: compact failed — no response from model (is it running?)", vim.log.levels.WARN)
           if record.bufnr and vim.api.nvim_buf_is_valid(record.bufnr) then
             chat_buffer.refresh(record.bufnr, record.messages)
@@ -804,6 +929,7 @@ function M._compact_session(record, config)
           summary = summary:gsub("<think>.*$", "") -- unclosed think block
           summary = summary:gsub("^%s+", ""):gsub("%s+$", "")
         elseif ok and result and result.error then
+          record._auto_compact_running = false
           vim.notify("neocode: compact failed — " .. tostring(result.error.message or result.error), vim.log.levels.WARN)
           if record.bufnr and vim.api.nvim_buf_is_valid(record.bufnr) then
             chat_buffer.refresh(record.bufnr, record.messages)
@@ -812,6 +938,7 @@ function M._compact_session(record, config)
         end
 
         if summary == "" then
+          record._auto_compact_running = false
           vim.notify("neocode: compact failed — model returned empty summary (try again)", vim.log.levels.WARN)
           -- Remove compacting indicator
           if record.bufnr and vim.api.nvim_buf_is_valid(record.bufnr) then
@@ -827,6 +954,9 @@ function M._compact_session(record, config)
           { role = "user", content = "Summarize our conversation so far." },
           { role = "assistant", content = "Here is a summary of our conversation:\n\n" .. summary },
         }
+        for _, msg in ipairs(recent_messages) do
+          table.insert(record.messages, msg)
+        end
         M._save_api_summary(config, record, summary)
         M._append_transcript(config, record, {
           role = "system",
@@ -850,10 +980,18 @@ function M._compact_session(record, config)
         -- Save compacted prompt-ready history without deleting the raw transcript.
         M._save_api_messages(config, record, record.messages)
 
+        record._auto_compact_running = false
+
         vim.notify("neocode: conversation compacted", vim.log.levels.INFO)
       end)
     end,
   })
+  if compact_job_id <= 0 then
+    record._auto_compact_running = false
+    vim.notify("neocode: compact failed — could not start curl", vim.log.levels.WARN)
+    return false
+  end
+  return true
 end
 
 function M._open_api_input(record, config)
@@ -1178,6 +1316,17 @@ function M._open_api_input(record, config)
         chat_buffer.refresh(record.bufnr, record.messages)
 
         M._save_api_messages(config, record, record.messages)
+
+        if M._mark_auto_compact_if_needed(config, record, stats) then
+          local usage = record._auto_compact_last_usage or {}
+          if usage.used_tokens and usage.context_size then
+            vim.notify(
+              string.format("neocode: auto-compacting conversation (%d/%d context)", usage.used_tokens, usage.context_size),
+              vim.log.levels.INFO
+            )
+          end
+          M._compact_session(record, config)
+        end
       end
 
       if tools and #tools > 0 then

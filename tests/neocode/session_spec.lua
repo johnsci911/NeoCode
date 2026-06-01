@@ -144,6 +144,107 @@ describe("session", function()
     end)
   end)
 
+  describe("auto compaction helpers", function()
+    it("uses runtime context size from stats before adapter or config fallbacks", function()
+      local record = {
+        api_adapter = {
+          config = { context_size = 32768 },
+        },
+      }
+      local config = {
+        auto_compact = { context_size = 16384 },
+      }
+
+      assert.equals(24576, session._auto_compact_context_size(config, record, { context_size = 24576 }))
+    end)
+
+    it("falls back to adapter context size", function()
+      local record = {
+        api_adapter = {
+          config = { context_size = 24576 },
+        },
+      }
+
+      assert.equals(24576, session._auto_compact_context_size({}, record, {}))
+    end)
+
+    it("requires an OpenAI-compatible compact endpoint before compacting", function()
+      assert.is_nil(session._compact_endpoint_config({ api_adapter = { config = {} } }))
+      assert.is_nil(session._compact_endpoint_config({ api_adapter = { name = "cli" } }))
+
+      assert.are.same({ base_url = "http://127.0.0.1:8080", model = "local" }, session._compact_endpoint_config({
+        api_adapter = { config = { base_url = "http://127.0.0.1:8080", model = "local" } },
+      }))
+    end)
+
+    it("detects when prompt usage crosses configured threshold", function()
+      local record = {
+        api_adapter = {
+          config = { context_size = 24576 },
+        },
+      }
+      local config = {
+        auto_compact = { enabled = true, threshold = 0.8 },
+      }
+
+      assert.is_false(session._should_auto_compact(config, record, { prompt_tokens = 19000 }))
+      assert.is_true(session._should_auto_compact(config, record, { prompt_tokens = 20000 }))
+    end)
+
+    it("does not compact when disabled or already compacting", function()
+      local record = {
+        _auto_compact_running = true,
+        api_adapter = { config = { context_size = 24576 } },
+      }
+
+      assert.is_false(session._should_auto_compact({ auto_compact = { enabled = true } }, record, { prompt_tokens = 24576 }))
+      record._auto_compact_running = false
+      assert.is_false(session._should_auto_compact({ auto_compact = { enabled = false } }, record, { prompt_tokens = 24576 }))
+    end)
+
+    it("marks the next turn for compaction after a high-context response", function()
+      local record = {
+        api_adapter = { config = { context_size = 24576, base_url = "http://127.0.0.1:8080", model = "local" } },
+      }
+      local config = {
+        auto_compact = { enabled = true, threshold = 0.8 },
+      }
+
+      assert.is_true(session._mark_auto_compact_if_needed(config, record, { prompt_tokens = 20000 }))
+      assert.is_true(record._auto_compact_pending)
+      assert.equals(20000, record._auto_compact_last_usage.prompt_tokens)
+      assert.equals(24576, record._auto_compact_last_usage.context_size)
+    end)
+
+    it("preserves the requested number of recent turns for compacted history", function()
+      local messages = {
+        { role = "user", content = "old question" },
+        { role = "assistant", content = "old answer" },
+        { role = "user", content = "recent question" },
+        { role = "assistant", content = "recent answer" },
+      }
+
+      assert.are.same({
+        { role = "user", content = "recent question" },
+        { role = "assistant", content = "recent answer" },
+      }, session._auto_compact_recent_messages(messages, 1))
+    end)
+
+    it("summarizes only older messages when recent turns are preserved", function()
+      local messages = {
+        { role = "user", content = "old question" },
+        { role = "assistant", content = "old answer" },
+        { role = "user", content = "recent question" },
+        { role = "assistant", content = "recent answer" },
+      }
+
+      assert.are.same({
+        { role = "user", content = "old question" },
+        { role = "assistant", content = "old answer" },
+      }, session._auto_compact_messages_to_summarize(messages, 1))
+    end)
+  end)
+
   it("creates a record with correct fields", function()
     local s = session._new_record("claude", "Test session")
     assert.is_not_nil(s.id)

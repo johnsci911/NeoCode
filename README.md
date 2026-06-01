@@ -81,6 +81,25 @@ llama.setup({
 
 NeoCode only opens the Continue terminal session. Continue handles model selection, roles, prompts, tools, completion options, and provider details.
 
+To make Continue compact around ~20k tokens on a llama-server running with a 24,576 token context, set Continue's own limits:
+
+```yaml
+models:
+  - name: Local Llama
+    provider: openai
+    model: unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF
+    apiBase: http://127.0.0.1:8080/v1
+    defaultCompletionOptions:
+      contextLength: 24576
+      maxTokens: 3500
+    roles:
+      - chat
+      - edit
+      - apply
+```
+
+Continue CLI owns its live chat history, so NeoCode cannot reliably rewrite or compact a running Continue session from the outside.
+
 ### With OpenCode
 
 ```lua
@@ -167,7 +186,7 @@ When no instruction files exist, auto-detects:
 
 - Auto-title sessions from first message
 - Save and resume conversations across Neovim restarts
-- `/compact` command — summarize conversation to free context
+- `/compact` command — summarize NeoCode-managed API conversations to free context
 - `/rename <title>` command or `R` keymap — rename the current session
 - Session history picker with timestamps (`h` keymap)
 - Multi-select delete (`<Tab>` to select, `d` to delete)
@@ -211,7 +230,7 @@ When no instruction files exist, auto-detects:
 
 | Command | Action |
 |---------|--------|
-| `/compact` | Summarize conversation to free context |
+| `/compact` | Summarize NeoCode-managed API conversations to free context |
 | `/rename <title>` | Rename current session |
 | `/readfile <path>` | Read an exact local file without web search |
 | `/websearch <query>` | Force web search for current/external information |
@@ -236,6 +255,12 @@ require("neocode").setup({
   data_dir           = vim.fn.stdpath("data") .. "/neocode",
   telescope_fallback = true,
   winbar             = "  ? help  h resume  i input  R rename  <leader>p image  <C-c> stop  H toggle  { } cycle\n",
+  auto_compact       = {
+    enabled = false, -- API sessions only; CLI adapters such as Continue own their own history
+    threshold = 0.8, -- compact at 80% of context_size, e.g. ~20k/24.5k
+    context_size = 24576,
+    preserve_recent_turns = 4,
+  },
   adapters = {
     claude = require("neocode.adapters.claude"),
   },
