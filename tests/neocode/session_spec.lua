@@ -243,6 +243,72 @@ describe("session", function()
         { role = "assistant", content = "old answer" },
       }, session._auto_compact_messages_to_summarize(messages, 1))
     end)
+
+    it("continues from compacted summary and clears stale high-context usage", function()
+      local tmp_dir = vim.fn.tempname()
+      vim.fn.mkdir(tmp_dir, "p")
+      local buf = vim.api.nvim_create_buf(false, true)
+      local record = {
+        id = "compact-reset",
+        adapter = "llama",
+        title = "Compact reset",
+        created_at = 123,
+        cwd = "/tmp/project",
+        bufnr = buf,
+        api_adapter = {
+          config = { base_url = "http://127.0.0.1:8080", model = "local-model" },
+        },
+        messages = {
+          { role = "user", content = "old question" },
+          { role = "assistant", content = "old answer" },
+          { role = "user", content = "recent question" },
+          { role = "assistant", content = "recent answer" },
+        },
+        _auto_compact_pending = true,
+        _auto_compact_last_usage = { used_tokens = 20000, context_size = 24576 },
+      }
+      local config = {
+        data_dir = tmp_dir,
+        auto_compact = { preserve_recent_turns = 1 },
+      }
+      local original_jobstart = vim.fn.jobstart
+      vim.fn.jobstart = function(_, opts)
+        opts.on_stdout(1, {
+          vim.fn.json_encode({
+            choices = {
+              { message = { content = "Compacted summary of the old conversation." } },
+            },
+          }),
+        })
+        return 99
+      end
+
+      local ok, err = pcall(function()
+        assert.is_true(session._compact_session(record, config))
+        vim.wait(1000, function()
+          return record._auto_compact_running == false
+        end)
+
+        assert.are.same({
+          { role = "user", content = "Summarize our conversation so far." },
+          { role = "assistant", content = "Here is a summary of our conversation:\n\nCompacted summary of the old conversation." },
+          { role = "user", content = "recent question" },
+          { role = "assistant", content = "recent answer" },
+        }, record.messages)
+        assert.is_nil(record._auto_compact_last_usage)
+        assert.is_false(record._auto_compact_pending)
+        assert.is_false(record._auto_compact_running)
+        local saved = session._load_api_messages(config, record)
+        assert.equals("Here is a summary of our conversation:\n\nCompacted summary of the old conversation.", saved[2].content)
+      end)
+
+      vim.fn.jobstart = original_jobstart
+      vim.fn.delete(tmp_dir, "rf")
+      if vim.api.nvim_buf_is_valid(buf) then
+        vim.api.nvim_buf_delete(buf, { force = true })
+      end
+      assert.is_true(ok, err)
+    end)
   end)
 
   it("creates a record with correct fields", function()
@@ -408,6 +474,26 @@ describe("session disk operations", function()
   it("load_all_from_disk() returns empty table when no file", function()
     local all = session.load_all_from_disk(config)
     assert.equals(0, #all)
+  end)
+
+  it("load_all_from_disk() hides stale sessions for adapters with session_store = false", function()
+    local f = io.open(tmp_dir .. "/sessions.json", "w")
+    f:write(vim.fn.json_encode({
+      { id = "llama-old", adapter = "llama", title = "Old local chat", status = "closed", created_at = 1 },
+      { id = "claude-old", adapter = "claude", title = "Old Claude chat", status = "closed", created_at = 2 },
+    }))
+    f:close()
+
+    local all = session.load_all_from_disk({
+      data_dir = tmp_dir,
+      adapters = {
+        llama = { name = "llama", session_store = false },
+        claude = { name = "claude", session_store = true },
+      },
+    })
+
+    assert.equals(1, #all)
+    assert.equals("claude-old", all[1].id)
   end)
 
   it("delete_from_disk() removes session by id", function()

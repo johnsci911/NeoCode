@@ -7,7 +7,7 @@
 local M = {}
 
 M.name = "llama"
-M.session_store = true
+M.session_store = false
 
 M.defaults = {
   command = "cn",
@@ -182,10 +182,24 @@ function M._with_continue_config_arg(args, path)
   return filtered
 end
 
-function M.launch_cmd(opts)
+function M._with_resume_arg(args)
+  local filtered = {}
+  for _, arg in ipairs(args or {}) do
+    if arg ~= "--resume" then
+      table.insert(filtered, arg)
+    end
+  end
+  table.insert(filtered, "--resume")
+  return filtered
+end
+
+local function build_cmd(opts, resume)
   local cfg = config()
   local args = vim.deepcopy(cfg.args or {})
   local dynamic_cfg = cfg.dynamic_continue_config or {}
+  if resume then
+    args = M._with_resume_arg(args)
+  end
   
   if dynamic_cfg.enabled then
     local path, metadata = M._write_dynamic_continue_config(dynamic_cfg)
@@ -210,8 +224,12 @@ function M.launch_cmd(opts)
   }
 end
 
+function M.launch_cmd(opts)
+  return build_cmd(opts, false)
+end
+
 function M.resume_cmd(opts)
-  return M.launch_cmd(opts)
+  return build_cmd(opts, true)
 end
 
 function M.interrupt(session)

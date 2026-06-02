@@ -2,7 +2,7 @@ local M = {}
 
 -- Open a floating input buffer for composing multi-line prompts.
 -- On <C-s> or <leader><CR>: sends content to the CLI via chansend, closes window.
--- On <Esc> (normal mode): cancels without sending.
+-- On <Esc>: cancels without sending.
 function M.open(session, config)
   if not session then
     vim.notify("neocode: no active session", vim.log.levels.WARN)
@@ -71,7 +71,9 @@ function M.open(session, config)
   vim.keymap.set("i", "<M-CR>", send_and_close, { buffer = buf, silent = true })
   vim.keymap.set("n", "<M-CR>", send_and_close, { buffer = buf, silent = true })
 
-  -- Cancel: <Esc> in normal mode
+  -- Cancel: <Esc> in both modes. The input window starts in insert mode, so
+  -- insert-mode mapping is required; otherwise Escape only switches modes.
+  vim.keymap.set("i", "<Esc>", cancel, { buffer = buf, silent = true })
   vim.keymap.set("n", "<Esc>", cancel, { buffer = buf, silent = true })
 end
 

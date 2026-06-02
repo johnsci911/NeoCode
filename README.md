@@ -103,7 +103,7 @@ models:
       - apply
 ```
 
-Continue CLI owns its live chat history, so NeoCode cannot reliably rewrite or compact a running Continue session from the outside.
+Continue CLI owns its live chat history, so NeoCode cannot reliably rewrite or compact a running Continue session from the outside. Llama/Continue sessions are not persisted in NeoCode's session store; use Continue's history/resume flow instead.
 
 Alternatively, enable `dynamic_continue_config` to let NeoCode generate that Continue config at launch time from a running `llama-server`. NeoCode reads `/props` and `/v1/models`, writes a generated config to `stdpath("data") .. "/neocode/continue.generated.yaml"`, then launches `cn --config <generated-file>`:
 
@@ -119,6 +119,8 @@ llama.setup({
 ```
 
 The generated config uses the server's runtime context (`n_ctx`, for example `24576`) rather than the model's training context (`n_ctx_train`). If probing fails because `llama-server` is not running, NeoCode falls back to the adapter's configured `args`. When generation succeeds, NeoCode preserves other Continue CLI args and replaces only an existing `--config` argument with the generated config path.
+
+Resume also goes through Continue CLI. Pressing NeoCode's resume key for a Llama/Continue terminal launches `cn --resume`; if `dynamic_continue_config` is enabled, NeoCode first regenerates the config and resumes with `cn --resume --config <generated-file>`.
 
 ### With OpenCode
 
@@ -156,6 +158,7 @@ OpenCode runs as its own terminal UI. NeoCode adds the same floating multi-line 
 
 - `Llama (Local)` launches Continue CLI (`cn`) in a NeoCode terminal session
 - Continue owns local model configuration through `~/.continue/config.yaml` by default
+- Continue owns local chat history; NeoCode resumes via `cn --resume` instead of saving Llama sessions itself
 - Optional `dynamic_continue_config` can generate model/provider/context settings from a running llama-server before launching Continue
 
 ### Local Tool Calling

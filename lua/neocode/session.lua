@@ -446,7 +446,16 @@ function M.load_all_from_disk(config)
   local ok, data = pcall(vim.fn.json_decode, f:read("*a"))
   f:close()
   if not ok or type(data) ~= "table" then return {} end
-  return data
+
+  local adapters = config.adapters or {}
+  local filtered = {}
+  for _, s in ipairs(data) do
+    local adapter = adapters[s.adapter]
+    if not adapter or adapter.session_store ~= false then
+      table.insert(filtered, s)
+    end
+  end
+  return filtered
 end
 
 function M._store_for_record(config, record)
@@ -980,6 +989,7 @@ function M._compact_session(record, config)
         -- Save compacted prompt-ready history without deleting the raw transcript.
         M._save_api_messages(config, record, record.messages)
 
+        record._auto_compact_last_usage = nil
         record._auto_compact_running = false
 
         vim.notify("neocode: conversation compacted", vim.log.levels.INFO)

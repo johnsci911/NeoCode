@@ -8,10 +8,20 @@ describe("llama adapter", function()
   it("launches Continue CLI as a normal terminal adapter", function()
     assert.equals("llama", llama.name)
     assert.is_nil(llama.type)
-    assert.is_true(llama.session_store)
+    assert.is_false(llama.session_store)
     assert.is_function(llama.launch_cmd)
+    assert.is_function(llama.resume_cmd)
     assert.is_function(llama.interrupt)
     assert.is_function(llama.attach_image)
+  end)
+
+  it("resumes through Continue CLI history instead of NeoCode history", function()
+    local spec = llama.resume_cmd({ cwd = "/tmp/project" })
+
+    assert.equals("cn", spec.cmd)
+    assert.same({ "--resume" }, spec.args)
+    assert.equals("/tmp/project", spec.cwd)
+    assert.is_nil(spec.env)
   end)
 
   it("uses cn by default and lets Continue own the local model configuration", function()
@@ -103,6 +113,26 @@ describe("llama adapter", function()
     local spec = llama.launch_cmd({ cwd = "/tmp/project" })
 
     assert.same({ "--verbose", "--trace", "--config", tmp }, spec.args)
+    vim.fn.delete(tmp)
+  end)
+
+  it("resumes Continue history with a generated config when dynamic setup succeeds", function()
+    local tmp = vim.fn.tempname()
+    llama.setup({
+      args = { "--verbose", "--config", "/old/config.yaml" },
+      dynamic_continue_config = {
+        enabled = true,
+        output = tmp,
+        probe = function()
+          return { model = "local-model", context_length = 24576 }
+        end,
+      },
+    })
+
+    local spec = llama.resume_cmd({ cwd = "/tmp/project" })
+
+    assert.same({ "--verbose", "--resume", "--config", tmp }, spec.args)
+    assert.equals(1, vim.fn.filereadable(tmp))
     vim.fn.delete(tmp)
   end)
 
