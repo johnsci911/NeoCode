@@ -5,7 +5,7 @@ A simple Neovim plugin that wraps AI CLIs with additional features:
 - **Visible multi-line input** — compose prompts in a floating editor, not a single terminal line
 - **Paste images from clipboard** — send screenshots and diagrams straight to the AI
 - **Native session keymaps** — open, resume, and manage CLI sessions without leaving Neovim
-- **Local LLM support** — launch Continue CLI for local models configured in Continue
+- **Local LLM support** — use NeoCode Local for OpenAI-compatible local servers, or launch Continue CLI as a fallback
 - **Native local tools** — read files, list directories, and search code from NeoCode API sessions
 - **Web search** — explicit/current-info DuckDuckGo search without hijacking local project prompts
 - **Project context** — auto-reads .neocode.md, CLAUDE.md, .cursorrules, README.md, and more
@@ -32,6 +32,8 @@ No fancy UI, just plain simple native AI CLI experience inside Neovim.
 ```
 
 ### With Local LLM (Continue CLI)
+
+Continue remains available as the legacy/fallback local CLI path. It owns its own model configuration, tools, and history.
 
 ```lua
 {
@@ -122,6 +124,58 @@ The generated config uses the server's runtime context (`n_ctx`, for example `24
 
 Resume also goes through Continue CLI. Pressing NeoCode's resume key for a Llama/Continue terminal launches `cn --resume`; if `dynamic_continue_config` is enabled, NeoCode first regenerates the config and resumes with `cn --resume --config <generated-file>`.
 
+### With NeoCode Local
+
+`NeoCode Local` is NeoCode's first-party API-backed local adapter. It talks directly to an OpenAI-compatible endpoint and lets NeoCode own the chat buffer, session history, local tools, usage stats, and compaction.
+
+```lua
+{
+  "johnsci911/NeoCode",
+  dependencies = { "nvim-lua/plenary.nvim", "nvim-telescope/telescope.nvim" },
+  config = function()
+    local local_adapter = require("neocode.adapters.local")
+    local_adapter.setup({
+      provider = "llama_server", -- or "openai_compatible"
+      base_url = "http://127.0.0.1:8080/v1",
+    })
+
+    require("neocode").setup({
+      default_adapter = "local",
+      adapters = {
+        ["local"] = local_adapter,
+        claude = require("neocode.adapters.claude"),
+      },
+    })
+  end,
+}
+```
+
+For `llama-server`, NeoCode Local probes `/props` and `/v1/models` to populate the active model name and runtime context window. For generic OpenAI-compatible servers, it probes `/v1/models` and falls back to the configured context size when the server does not expose one.
+
+Optional configuration:
+
+```lua
+local_adapter.setup({
+  provider = "openai_compatible",
+  base_url = "http://127.0.0.1:1234/v1",
+  model = "local-model",       -- fallback if probing cannot detect one
+  context_size = 32768,         -- fallback if metadata is unavailable
+  temperature = 0.2,
+  max_tokens = 4096,
+})
+```
+
+NeoCode Local uses NeoCode-managed API sessions, so `/compact`, history resume, native project tools, and web-search tool routing work through NeoCode rather than Continue.
+
+NeoCode Local can expose workspace tools to the model:
+
+- read files
+- list directories
+- search files
+- run shell commands
+
+Shell commands use a small safe-command allowlist. Other commands pause for a per-session approval prompt with `Allow once`, `Allow and don't ask again`, `No`, and `Continue prompting`. Likely interactive commands such as `vim`, `nvim`, `less`, `top`, `ssh`, `python`, and `node` REPL sessions are blocked instead of being sent blindly to the terminal.
+
 ### With OpenCode
 
 ```lua
@@ -149,25 +203,34 @@ OpenCode runs as its own terminal UI. NeoCode adds the same floating multi-line 
 - [telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) *(optional — falls back to `vim.ui.select`)*
 - [render-markdown.nvim](https://github.com/MeanderingProgrammer/render-markdown.nvim) *(optional — renders chat with proper markdown)*
 - `pngpaste` (macOS) or `wl-paste` / `xclip` (Linux) for image paste
-- [Continue CLI](https://docs.continue.dev/cli/) (`cn`) for local LLM support
+- A local OpenAI-compatible model server for NeoCode Local, such as `llama-server`
+- [Continue CLI](https://docs.continue.dev/cli/) (`cn`) for the legacy/fallback local CLI path
 - [OpenCode](https://opencode.ai/) (`opencode`) for OpenCode sessions
 
 ## Features
 
+### NeoCode Local and Continue CLI
+
+- `NeoCode Local` talks directly to OpenAI-compatible local servers through NeoCode's API session flow
+- `NeoCode Local` probes model/context metadata when available and keeps local tools/session history inside NeoCode
+- `Llama (Continue)` launches Continue CLI (`cn`) in a NeoCode terminal session
+- Continue remains useful as a fallback when you want Continue to own local model configuration and history
+
 ### Local LLM via Continue CLI
 
-- `Llama (Local)` launches Continue CLI (`cn`) in a NeoCode terminal session
+- `Llama (Continue)` launches Continue CLI (`cn`) in a NeoCode terminal session
 - Continue owns local model configuration through `~/.continue/config.yaml` by default
 - Continue owns local chat history; NeoCode resumes via `cn --resume` instead of saving Llama sessions itself
 - Optional `dynamic_continue_config` can generate model/provider/context settings from a running llama-server before launching Continue
 
 ### Local Tool Calling
 
-NeoCode API sessions can expose three native workspace tools for project prompts:
+NeoCode API sessions can expose native workspace tools for project prompts:
 
 - `neocode__read_file` — read one text file inside the workspace
 - `neocode__list_directory` — list files in a workspace directory
 - `neocode__search_files` — search workspace text files
+- `neocode__run_shell_command` — run approved shell commands in the workspace
 
 NeoCode keeps web search separate from the local hot path:
 
@@ -215,6 +278,20 @@ When no instruction files exist, auto-detects:
 - Multi-select delete (`<Tab>` to select, `d` to delete)
 - Auto-switch to next session on close (`Q`)
 
+### Memory and Skills
+
+NeoCode Local stores project-scoped memory in NeoCode's data directory, not inside the project repository.
+
+Use explicit slash commands from a NeoCode API session:
+
+| Command | Action |
+|---------|--------|
+| `/memory save <text>` | Save a project-scoped memory entry under `stdpath("data")/neocode/memory/projects/` |
+| `/skill save <name> <instructions>` | Save a reusable skill under `stdpath("data")/neocode/skills/` |
+| `/skill select <name>[,name...]` | Manually select skills to inject into future turns for the current runtime config |
+
+Memory and selected skills are injected as system context for NeoCode-managed API sessions. NeoCode does not write `.neocode/memory.md` or generated skill files into the project tree by default.
+
 ## Keymaps
 
 ### Global
@@ -257,6 +334,9 @@ When no instruction files exist, auto-detects:
 | `/rename <title>` | Rename current session |
 | `/readfile <path>` | Read an exact local file without web search |
 | `/websearch <query>` | Force web search for current/external information |
+| `/memory save <text>` | Save project memory in NeoCode's data directory |
+| `/skill save <name> <instructions>` | Save a reusable skill in NeoCode's data directory |
+| `/skill select <name>[,name...]` | Manually select skills for future turns |
 
 ### Session picker (`h`)
 

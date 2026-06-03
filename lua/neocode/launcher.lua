@@ -1,20 +1,32 @@
 local M = {}
 
-function M.open(config)
-  local session = require("neocode.session")
+local LABEL_MAP = {
+  claude = "  Claude CLI",
+  opencode = "  OpenCode",
+  gemini = "  Gemini CLI",
+  llama = "  Llama (Continue)",
+  ["local"] = "  NeoCode Local",
+}
 
+function M._entries(config)
   local adapter_order = {}
   for name in pairs(config.adapters or {}) do
     table.insert(adapter_order, name)
   end
   table.sort(adapter_order)
 
-  local label_map = { claude = "  Claude CLI", opencode = "  OpenCode", gemini = "  Gemini CLI", llama = "  Llama (Local)" }
   local entries = {}
   for _, name in ipairs(adapter_order) do
-    local display = label_map[name] or ("  " .. name)
+    local display = LABEL_MAP[name] or ("  " .. name)
     table.insert(entries, { name = name, display = display })
   end
+  return entries
+end
+
+function M.open(config)
+  local session = require("neocode.session")
+
+  local entries = M._entries(config)
 
   local function on_selected(e)
     local adapter = config.adapters[e.name]
