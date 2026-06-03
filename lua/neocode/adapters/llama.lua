@@ -36,12 +36,26 @@ local function join_url(base, suffix)
   return (base or ""):gsub("/+$", "") .. suffix
 end
 
+local function normalize_server_base(server)
+  return (server or M.defaults.dynamic_continue_config.llama_server):gsub("/+$", ""):gsub("/v1$", "")
+end
+
+local function normalize_api_base(dynamic_cfg)
+  if dynamic_cfg.api_base and dynamic_cfg.api_base ~= "" then
+    return dynamic_cfg.api_base:gsub("/+$", "")
+  end
+
+  local server = (dynamic_cfg.llama_server or M.defaults.dynamic_continue_config.llama_server):gsub("/+$", "")
+  if server:match("/v1$") then return server end
+  return join_url(server, "/v1")
+end
+
 local function read_url_json(url)
   -- Use a timeout and check for shell errors
   local output = vim.fn.system({ "curl", "--silent", "--show-error", "--max-time", "3", url })
-  if vim.v.shell_error ~= 0 or output == "" then 
+  if vim.v.shell_error ~= 0 or output == "" then
     vim.notify(string.format("Failed to fetch URL: %s (Curl error %d)", url, vim.v.shell_error), vim.log.levels.WARN)
-    return nil 
+    return nil
   end
   local ok, data = pcall(vim.fn.json_decode, output)
   if ok and type(data) == "table" then return data end
@@ -76,7 +90,7 @@ function M._metadata_from_responses(props, models)
     or meta.n_ctx_train
 
   -- Ensure context_length is a number for safe use
-  context_length = tonumber(context_length) or 1 
+  context_length = tonumber(context_length) or 1
 
   return {
     model = model,
@@ -89,13 +103,11 @@ function M._probe_llama_server(dynamic_cfg)
   dynamic_cfg = dynamic_cfg or {}
   if dynamic_cfg.probe then return dynamic_cfg.probe(dynamic_cfg) end
 
-  local server = dynamic_cfg.llama_server or M.defaults.dynamic_continue_config.llama_server
-  
+  local server = normalize_server_base(dynamic_cfg.llama_server)
+
   local props = read_url_json(join_url(server, "/props"))
-  if not props then return nil end
-  
   local models = read_url_json(join_url(server, "/v1/models"))
-  if not models then return nil end
+  if not props and not models then return nil end
 
   return M._metadata_from_responses(props, models)
 end
@@ -110,7 +122,7 @@ end
 
 function M._build_continue_config(metadata, dynamic_cfg)
   dynamic_cfg = dynamic_cfg or {}
-  local api_base = dynamic_cfg.api_base or join_url(dynamic_cfg.llama_server or M.defaults.dynamic_continue_config.llama_server, "/v1")
+  local api_base = normalize_api_base(dynamic_cfg)
   local name = dynamic_cfg.name or M.defaults.dynamic_continue_config.name
   local max_tokens = dynamic_cfg.max_tokens or M.defaults.dynamic_continue_config.max_tokens
 
@@ -143,17 +155,17 @@ end
 
 function M._write_dynamic_continue_config(dynamic_cfg)
   local metadata = M._probe_llama_server(dynamic_cfg)
-  if not metadata or not metadata.model or not metadata.context_length then 
+  if not metadata or not metadata.model or not metadata.context_length then
     vim.notify("neocode: Failed to retrieve necessary metadata from llama-server.", vim.log.levels.ERROR)
-    return nil 
+    return nil
   end
 
   local path = generated_config_path(dynamic_cfg)
   vim.fn.mkdir(vim.fn.fnamemodify(path, ":h"), "p")
   local f = io.open(path, "w")
-  if not f then 
+  if not f then
     vim.notify(string.format("neocode: Could not open file for writing: %s", path), vim.log.levels.ERROR)
-    return nil 
+    return nil
   end
   f:write(M._build_continue_config(metadata, dynamic_cfg))
   f:close()
@@ -200,10 +212,10 @@ local function build_cmd(opts, resume)
   if resume then
     args = M._with_resume_arg(args)
   end
-  
+
   if dynamic_cfg.enabled then
     local path, metadata = M._write_dynamic_continue_config(dynamic_cfg)
-    if path then
+    if path and metadata then
       args = M._with_continue_config_arg(args, path)
       -- Only notify success if the path was generated successfully
       vim.notify(
@@ -215,7 +227,7 @@ local function build_cmd(opts, resume)
       vim.notify("neocode: Failed to generate dynamic Continue config. Launching with existing arguments.", vim.log.levels.WARN)
     end
   end
-  
+
   return {
     cmd = cfg.command,
     args = args,

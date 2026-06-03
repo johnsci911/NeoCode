@@ -904,6 +904,7 @@ function M._compact_session(record, config)
     temperature = 0.3,
     max_tokens = 500,
     enable_thinking = false,
+    chat_template_kwargs = { enable_thinking = false },
   })
 
   local compact_job_id = vim.fn.jobstart({

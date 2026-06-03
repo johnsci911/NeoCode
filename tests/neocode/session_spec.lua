@@ -272,7 +272,18 @@ describe("session", function()
         auto_compact = { preserve_recent_turns = 1 },
       }
       local original_jobstart = vim.fn.jobstart
-      vim.fn.jobstart = function(_, opts)
+      vim.fn.jobstart = function(argv, opts)
+        local payload
+        for i, arg in ipairs(argv or {}) do
+          if arg == "-d" then
+            payload = vim.fn.json_decode(argv[i + 1] or "{}")
+            break
+          end
+        end
+        assert.is_table(payload)
+        assert.is_false(payload.enable_thinking)
+        assert.is_table(payload.chat_template_kwargs)
+        assert.is_false(payload.chat_template_kwargs.enable_thinking)
         opts.on_stdout(1, {
           vim.fn.json_encode({
             choices = {

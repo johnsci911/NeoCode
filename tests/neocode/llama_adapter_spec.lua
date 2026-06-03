@@ -60,6 +60,21 @@ describe("llama adapter", function()
     assert.equals(262144, metadata.training_context_length)
   end)
 
+  it("extracts model and runtime context from v1 models when props are unavailable", function()
+    local metadata = llama._metadata_from_responses(nil, {
+      data = {
+        {
+          id = "unsloth/gemma-4-26B-A4B-it-GGUF",
+          meta = { n_ctx = 32768, n_ctx_train = 262144 },
+        },
+      },
+    })
+
+    assert.equals("unsloth/gemma-4-26B-A4B-it-GGUF", metadata.model)
+    assert.equals(32768, metadata.context_length)
+    assert.equals(262144, metadata.training_context_length)
+  end)
+
   it("builds a Continue config from detected llama-server metadata", function()
     local yaml = llama._build_continue_config({
       model = "local-model",
@@ -75,6 +90,18 @@ describe("llama adapter", function()
     assert.is_truthy(yaml:find("apiBase: http://127.0.0.1:8080/v1", 1, true))
     assert.is_truthy(yaml:find("contextLength: 24576", 1, true))
     assert.is_truthy(yaml:find("maxTokens: 3500", 1, true))
+  end)
+
+  it("does not duplicate v1 when llama_server already points at the OpenAI API base", function()
+    local yaml = llama._build_continue_config({
+      model = "local-model",
+      context_length = 32768,
+    }, {
+      llama_server = "http://127.0.0.1:8080/v1",
+    })
+
+    assert.is_truthy(yaml:find("apiBase: http://127.0.0.1:8080/v1", 1, true))
+    assert.is_falsy(yaml:find("/v1/v1", 1, true))
   end)
 
   it("launches Continue with a generated config when dynamic setup succeeds", function()
