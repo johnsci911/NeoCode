@@ -40,6 +40,33 @@ local TEXT_EXTENSIONS = {
   [".yml"] = true,
 }
 
+local SAFE_SHELL_COMMANDS = {
+  ["pwd"] = true,
+  ["ls"] = true,
+  ["ls -la"] = true,
+  ["ls -al"] = true,
+  ["git status"] = true,
+  ["git status --short"] = true,
+  ["git diff --stat"] = true,
+}
+
+local INTERACTIVE_COMMAND_PATTERNS = {
+  "^%s*vim%f[%W]",
+  "^%s*nvim%f[%W]",
+  "^%s*vi%f[%W]",
+  "^%s*nano%f[%W]",
+  "^%s*less%f[%W]",
+  "^%s*more%f[%W]",
+  "^%s*top%f[%W]",
+  "^%s*htop%f[%W]",
+  "^%s*ssh%f[%W]",
+  "^%s*mysql%f[%W]",
+  "^%s*psql%f[%W]",
+  "^%s*python%s*$",
+  "^%s*node%s*$",
+  "^%s*irb%s*$",
+}
+
 local function uv()
   return vim.uv or vim.loop
 end
@@ -143,6 +170,9 @@ function M.get_tools()
       max_results = { type = "number", description = "Maximum matches to return. Default 50." },
       max_files = { type = "number", description = "Maximum text files to scan. Default 500." },
     }, { "query" }),
+    schema("run_shell_command", "Run a shell command in the local workspace. Unsafe commands require user approval.", {
+      command = { type = "string", description = "Shell command to run." },
+    }, { "command" }),
   }
 end
 
@@ -150,6 +180,7 @@ function M.can_handle(name)
   return name == "neocode__read_file"
     or name == "neocode__list_directory"
     or name == "neocode__search_files"
+    or name == "neocode__run_shell_command"
 end
 
 local function parse_args(tool_call)
@@ -159,6 +190,30 @@ local function parse_args(tool_call)
     return nil, "invalid JSON arguments"
   end
   return args, nil
+end
+
+local function normalize_command(command)
+  return tostring(command or ""):gsub("^%s+", ""):gsub("%s+$", ""):gsub("%s+", " ")
+end
+
+function M.is_safe_shell_command(command)
+  return SAFE_SHELL_COMMANDS[normalize_command(command)] == true
+end
+
+function M.is_interactive_shell_command(command)
+  local normalized = normalize_command(command)
+  for _, pattern in ipairs(INTERACTIVE_COMMAND_PATTERNS) do
+    if normalized:match(pattern) then return true end
+  end
+  return false
+end
+
+function M.requires_permission(tool_call)
+  local fn = tool_call["function"] or tool_call
+  if fn.name ~= "neocode__run_shell_command" then return false end
+  local args = parse_args(tool_call)
+  if type(args) ~= "table" then return true end
+  return not M.is_safe_shell_command(args.command)
 end
 
 local function read_file(args, opts)
@@ -247,6 +302,39 @@ local function search_files(args, opts)
   return table.concat(results, "\n"), false
 end
 
+local function run_shell_command(args, opts)
+  local command = normalize_command(args.command)
+  if command == "" then return "Error: missing command", true end
+  if M.is_interactive_shell_command(command) then
+    return "Error: blocked likely interactive shell command", true
+  end
+  if not M.is_safe_shell_command(command) and not opts.allow_shell then
+    return "Error: shell command requires approval", true
+  end
+
+  local cwd = opts.cwd or vim.fn.getcwd()
+  local result
+  if vim.system then
+    result = vim.system({ "sh", "-lc", command }, { cwd = cwd, text = true }):wait()
+  else
+    local old_cwd = vim.fn.getcwd()
+    vim.cmd("lcd " .. vim.fn.fnameescape(cwd))
+    local output = vim.fn.system({ "sh", "-lc", command })
+    result = { code = vim.v.shell_error, stdout = output, stderr = "" }
+    vim.cmd("lcd " .. vim.fn.fnameescape(old_cwd))
+  end
+
+  local body = result.stdout or ""
+  local stderr = result.stderr or ""
+  if stderr ~= "" then body = body .. (body ~= "" and "\n" or "") .. stderr end
+  if body == "" then body = "(no output)" end
+  if #body > 12000 then body = body:sub(1, 12000) .. "\n\n[truncated]" end
+  if result.code ~= 0 then
+    return string.format("Command failed (%d): %s\n%s", result.code or -1, command, body), true
+  end
+  return string.format("Command: %s\n%s", command, body), false
+end
+
 function M.execute(tool_call, opts)
   opts = opts or {}
   local fn = tool_call["function"] or tool_call
@@ -261,6 +349,8 @@ function M.execute(tool_call, opts)
     return list_directory(args, opts)
   elseif name == "neocode__search_files" then
     return search_files(args, opts)
+  elseif name == "neocode__run_shell_command" then
+    return run_shell_command(args, opts)
   end
   return "Error: unknown local tool: " .. name, true
 end

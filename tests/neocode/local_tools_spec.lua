@@ -23,13 +23,72 @@ describe("local workspace tools", function()
       table.insert(names, schema["function"].name)
     end
 
-    assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files" }, names)
+    assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files", "neocode__run_shell_command" }, names)
     assert.equals("function", schemas[1].type)
     assert.is_not_nil(schemas[1]["function"].parameters.properties.path)
   end)
 
   it("does not claim non-local neocode tools", function()
     assert.is_false(local_tools.can_handle("neocode__web_search"))
+  end)
+
+  it("allows safe shell commands without extra permission", function()
+    assert.is_false(local_tools.requires_permission({
+      ["function"] = {
+        name = "neocode__run_shell_command",
+        arguments = vim.fn.json_encode({ command = "pwd" }),
+      },
+    }))
+
+    local result, is_error = local_tools.execute({
+      ["function"] = {
+        name = "neocode__run_shell_command",
+        arguments = vim.fn.json_encode({ command = "pwd" }),
+      },
+    }, { cwd = tmp_dir })
+
+    assert.is_false(is_error)
+    assert.is_truthy(result:find(tmp_dir, 1, true))
+  end)
+
+  it("requires permission for non-allowlisted shell commands", function()
+    local tool_call = {
+      ["function"] = {
+        name = "neocode__run_shell_command",
+        arguments = vim.fn.json_encode({ command = "echo hello" }),
+      },
+    }
+
+    assert.is_true(local_tools.requires_permission(tool_call))
+
+    local result, is_error = local_tools.execute(tool_call, { cwd = tmp_dir })
+
+    assert.is_true(is_error)
+    assert.is_truthy(result:find("requires approval", 1, true))
+  end)
+
+  it("runs approved non-allowlisted shell commands", function()
+    local result, is_error = local_tools.execute({
+      ["function"] = {
+        name = "neocode__run_shell_command",
+        arguments = vim.fn.json_encode({ command = "echo hello" }),
+      },
+    }, { cwd = tmp_dir, allow_shell = true })
+
+    assert.is_false(is_error)
+    assert.is_truthy(result:find("hello", 1, true))
+  end)
+
+  it("blocks likely interactive shell commands even with approval", function()
+    local result, is_error = local_tools.execute({
+      ["function"] = {
+        name = "neocode__run_shell_command",
+        arguments = vim.fn.json_encode({ command = "vim README.md" }),
+      },
+    }, { cwd = tmp_dir, allow_shell = true })
+
+    assert.is_true(is_error)
+    assert.is_truthy(result:find("interactive", 1, true))
   end)
 
   it("reads files relative to the workspace root", function()
