@@ -50,7 +50,7 @@ describe("session", function()
         table.insert(names, schema["function"].name)
       end
 
-      assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files" }, names)
+      assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files", "neocode__run_shell_command" }, names)
     end)
 
     it("offers web search as a model-chosen tool for current-info prompts", function()
@@ -65,7 +65,7 @@ describe("session", function()
         table.insert(names, schema["function"].name)
       end
 
-      assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files" }, names)
+      assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files", "neocode__run_shell_command" }, names)
     end)
 
     it("keeps README update prompts on local tools", function()
@@ -75,7 +75,133 @@ describe("session", function()
         table.insert(names, schema["function"].name)
       end
 
-      assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files" }, names)
+      assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files", "neocode__run_shell_command" }, names)
+    end)
+  end)
+
+  describe("tool permissions", function()
+    it("builds stable shell permission keys per command", function()
+      local key = session._tool_permission_key({
+        ["function"] = {
+          name = "neocode__run_shell_command",
+          arguments = vim.fn.json_encode({ command = "echo hello" }),
+        },
+      })
+
+      assert.equals("neocode__run_shell_command:echo hello", key)
+    end)
+
+    it("remembers allow-and-dont-ask-again decisions on the session record", function()
+      local old_select = vim.ui.select
+      vim.ui.select = function(_, _, cb) cb("Allow and don't ask again") end
+      local record = {}
+      local allowed = nil
+      local tool_call = {
+        ["function"] = {
+          name = "neocode__run_shell_command",
+          arguments = vim.fn.json_encode({ command = "echo hello" }),
+        },
+      }
+
+      session._request_tool_permission(record, tool_call, function(value) allowed = value end)
+
+      vim.ui.select = old_select
+      assert.is_true(allowed)
+      assert.is_true(record.tool_permissions["neocode__run_shell_command:echo hello"])
+    end)
+
+    it("persists allow-and-dont-ask-again decisions in layered session state", function()
+      local tmp = vim.fn.tempname()
+      vim.fn.mkdir(tmp, "p")
+      local old_select = vim.ui.select
+      vim.ui.select = function(_, _, cb) cb("Allow and don't ask again") end
+      local record = {
+        id = "permission-session",
+        cwd = "/tmp/project-root",
+      }
+      local config = { data_dir = tmp }
+      local tool_call = {
+        ["function"] = {
+          name = "neocode__run_shell_command",
+          arguments = vim.fn.json_encode({ command = "echo hello" }),
+        },
+      }
+
+      local ok, err = pcall(function()
+        session._request_tool_permission(record, tool_call, function() end, config)
+        local state = session._load_api_state(config, record)
+        assert.is_true(state.tool_permissions["neocode__run_shell_command:echo hello"])
+      end)
+
+      vim.ui.select = old_select
+      vim.fn.delete(tmp, "rf")
+      assert.is_true(ok, err)
+    end)
+  end)
+
+  describe("memory context", function()
+    it("loads project memory from NeoCode data dir", function()
+      local tmp = vim.fn.tempname()
+      local cwd = vim.fn.tempname()
+      vim.fn.mkdir(tmp, "p")
+      vim.fn.mkdir(cwd, "p")
+      local store = require("neocode.memory").new({ data_dir = tmp, cwd = cwd })
+      store.save({ text = "Use pnpm." })
+
+      local msg = session._build_memory_context({ data_dir = tmp }, cwd)
+
+      vim.fn.delete(tmp, "rf")
+      vim.fn.delete(cwd, "rf")
+      assert.equals("system", msg.role)
+      assert.is_true(msg._is_memory_context)
+      assert.is_truthy(msg.content:find("Use pnpm.", 1, true))
+    end)
+  end)
+
+  describe("skills context", function()
+    it("loads manually selected skills from NeoCode data dir", function()
+      local tmp = vim.fn.tempname()
+      vim.fn.mkdir(tmp, "p")
+      local store = require("neocode.skills").new({ data_dir = tmp })
+      store.save("laravel", "Use Laravel conventions.")
+
+      local msg = session._build_skills_context({ data_dir = tmp, selected_skills = { "laravel" } })
+
+      vim.fn.delete(tmp, "rf")
+      assert.equals("system", msg.role)
+      assert.is_true(msg._is_skills_context)
+      assert.is_truthy(msg.content:find("Use Laravel conventions.", 1, true))
+    end)
+  end)
+
+  describe("local memory and skill commands", function()
+    it("handles /memory save without writing to the project tree", function()
+      local tmp = vim.fn.tempname()
+      local cwd = vim.fn.tempname()
+      vim.fn.mkdir(tmp, "p")
+      vim.fn.mkdir(cwd, "p")
+      local record = { cwd = cwd }
+
+      assert.is_true(session._handle_local_command("/memory save Use pnpm.", record, { data_dir = tmp }))
+
+      local msg = session._build_memory_context({ data_dir = tmp }, cwd)
+      vim.fn.delete(tmp, "rf")
+      vim.fn.delete(cwd, "rf")
+      assert.is_truthy(msg.content:find("Use pnpm.", 1, true))
+    end)
+
+    it("handles /skill save and /skill select", function()
+      local tmp = vim.fn.tempname()
+      vim.fn.mkdir(tmp, "p")
+      local config = { data_dir = tmp }
+
+      assert.is_true(session._handle_local_command("/skill save laravel Use Laravel conventions.", {}, config))
+      assert.is_true(session._handle_local_command("/skill select laravel", {}, config))
+
+      local msg = session._build_skills_context(config)
+      vim.fn.delete(tmp, "rf")
+      assert.same({ "laravel" }, config.selected_skills)
+      assert.is_truthy(msg.content:find("Use Laravel conventions.", 1, true))
     end)
   end)
 
@@ -367,6 +493,16 @@ describe("session", function()
   it("strips transient web-search system context from saved API messages", function()
     local messages = session._clean_api_messages({
       { role = "system", content = "web search results", _is_web_search = true },
+      { role = "user", content = "hello" },
+    })
+
+    assert.same({ { role = "user", content = "hello" } }, messages)
+  end)
+
+  it("strips transient memory and skills context from saved API messages", function()
+    local messages = session._clean_api_messages({
+      { role = "system", content = "Project memory", _is_memory_context = true },
+      { role = "system", content = "Selected skills", _is_skills_context = true },
       { role = "user", content = "hello" },
     })
 

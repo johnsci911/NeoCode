@@ -170,6 +170,120 @@ function M._build_project_tools(text, cwd)
   return tools
 end
 
+function M._tool_permission_key(tool_call)
+  local fn = tool_call and (tool_call["function"] or tool_call) or {}
+  local name = fn.name or "unknown"
+  local args = {}
+  local ok, parsed = pcall(vim.fn.json_decode, fn.arguments or "{}")
+  if ok and type(parsed) == "table" then args = parsed end
+  if name == "neocode__run_shell_command" then
+    return name .. ":" .. tostring(args.command or "")
+  end
+  return name
+end
+
+function M._save_api_state(config, record)
+  if not record or not record.id then return false end
+  local store = M._store_for_record(config, record)
+  return store.save_state(record.id, {
+    tool_permissions = record.tool_permissions or {},
+  })
+end
+
+function M._load_api_state(config, record)
+  if not record or not record.id then return {} end
+  local store = M._store_for_record(config, record)
+  local state = store.load_state(record.id)
+  if type(state) ~= "table" then return {} end
+  return state
+end
+
+function M._request_tool_permission(record, tool_call, callback, config)
+  record.tool_permissions = record.tool_permissions or {}
+  local key = M._tool_permission_key(tool_call)
+  if record.tool_permissions[key] == true then
+    callback(true)
+    return
+  end
+
+  local fn = tool_call and (tool_call["function"] or tool_call) or {}
+  local ok_args, args = pcall(vim.fn.json_decode, fn.arguments or "{}")
+  if not ok_args or type(args) ~= "table" then args = {} end
+  local command = args.command or fn.name or "tool"
+
+  vim.ui.select({
+    "Allow once",
+    "Allow and don't ask again",
+    "No",
+    "Continue prompting",
+  }, {
+    prompt = "NeoCode wants to run: " .. tostring(command),
+  }, function(choice)
+    if choice == "Allow and don't ask again" then
+      record.tool_permissions[key] = true
+      if config then
+        M._save_api_state(config, record)
+      end
+      callback(true)
+    elseif choice == "Allow once" then
+      callback(true)
+    else
+      callback(false)
+    end
+  end)
+end
+
+function M._build_memory_context(config, cwd)
+  local ok, memory = pcall(require, "neocode.memory")
+  if not ok then return nil end
+  local store = memory.new({ data_dir = config and config.data_dir, cwd = cwd })
+  return store.context_message()
+end
+
+function M._build_skills_context(config)
+  local selected = config and config.selected_skills or nil
+  if type(selected) ~= "table" or #selected == 0 then return nil end
+  local ok, skills = pcall(require, "neocode.skills")
+  if not ok then return nil end
+  local store = skills.new({ data_dir = config and config.data_dir })
+  return store.context_message(selected)
+end
+
+function M._handle_local_command(text, record, config)
+  local memory_text = text:match("^%s*/memory%s+save%s+(.+)%s*$")
+  if memory_text then
+    local ok, memory = pcall(require, "neocode.memory")
+    if ok then
+      local store = memory.new({ data_dir = config and config.data_dir, cwd = record and record.cwd })
+      store.save({ text = memory_text })
+      vim.notify("neocode: saved project memory", vim.log.levels.INFO)
+    end
+    return true
+  end
+
+  local skill_name, skill_content = text:match("^%s*/skill%s+save%s+(%S+)%s+(.+)%s*$")
+  if skill_name and skill_content then
+    local ok, skills = pcall(require, "neocode.skills")
+    if ok then
+      skills.new({ data_dir = config and config.data_dir }).save(skill_name, skill_content)
+      vim.notify("neocode: saved skill '" .. skill_name .. "'", vim.log.levels.INFO)
+    end
+    return true
+  end
+
+  local selected = text:match("^%s*/skill%s+select%s+(.+)%s*$")
+  if selected then
+    config.selected_skills = {}
+    for name in selected:gmatch("[^,%s]+") do
+      table.insert(config.selected_skills, name)
+    end
+    vim.notify("neocode: selected " .. tostring(#config.selected_skills) .. " skill(s)", vim.log.levels.INFO)
+    return true
+  end
+
+  return false
+end
+
 local function strip_path_token(path)
   return (path or "")
     :gsub("^[`'\"]+", "")
@@ -469,7 +583,7 @@ end
 function M._clean_api_messages(messages)
   local save_messages = {}
   for _, msg in ipairs(messages or {}) do
-    if not (msg.role == "system" and (msg._is_direct_file_context or msg._is_web_search)) then
+    if not (msg.role == "system" and (msg._is_direct_file_context or msg._is_web_search or msg._is_memory_context or msg._is_skills_context)) then
       local clean = { role = msg.role, content = msg.content }
       if msg.tool_calls then
         local clean_tcs = {}
@@ -672,6 +786,11 @@ function M.create_api(adapter, title, config)
     record.messages = saved
   end
 
+  local state = M._load_api_state(config, record)
+  if type(state.tool_permissions) == "table" then
+    record.tool_permissions = state.tool_permissions
+  end
+
   local buf = chat_buffer.create(record.messages)
   record.bufnr = buf
 
@@ -752,6 +871,11 @@ function M.resume_api(adapter, session_data, config)
       ::skip_msg::
     end
     record.messages = clean
+  end
+
+  local state = M._load_api_state(config, record)
+  if type(state.tool_permissions) == "table" then
+    record.tool_permissions = state.tool_permissions
   end
 
   local buf = chat_buffer.create(record.messages)
@@ -1067,19 +1191,23 @@ function M._open_api_input(record, config)
       return
     end
 
+    if M._handle_local_command(text, record, config) then
+      return
+    end
+
     -- Age any existing web-search system messages and drop stale ones.
     -- Web search results are only relevant to the turn that requested them
-    -- plus one follow-up turn; anything older is dead context that burns
-    -- prefill time every round. Messages are tagged with _is_web_search and
-    -- _age when injected in the search callback below.
-    for i = #record.messages, 1, -1 do
-      local msg = record.messages[i]
-      if msg.role == "system" and msg._is_direct_file_context then
-        table.remove(record.messages, i)
-      elseif msg.role == "system" and msg._is_web_search then
-        msg._age = (msg._age or 0) + 1
-        if msg._age >= 2 then
+      -- plus one follow-up turn; anything older is dead context that burns
+      -- prefill time every round. Messages are tagged with _is_web_search and
+      -- _age when injected in the search callback below.
+      for i = #record.messages, 1, -1 do
+        local msg = record.messages[i]
+        if msg.role == "system" and (msg._is_direct_file_context or msg._is_memory_context or msg._is_skills_context) then
           table.remove(record.messages, i)
+        elseif msg.role == "system" and msg._is_web_search then
+          msg._age = (msg._age or 0) + 1
+          if msg._age >= 2 then
+            table.remove(record.messages, i)
         end
       end
     end
@@ -1098,6 +1226,15 @@ function M._open_api_input(record, config)
             table.insert(record.messages, M._build_direct_file_context_message(direct_read_path, direct_read_content))
           end
         end
+      end
+
+      local memory_context = M._build_memory_context(config, record.cwd)
+      if memory_context then
+        table.insert(record.messages, memory_context)
+      end
+      local skills_context = M._build_skills_context(config)
+      if skills_context then
+        table.insert(record.messages, skills_context)
       end
 
       local user_msg = llama._build_user_message(text, record.pending_image_b64)
@@ -1394,8 +1531,22 @@ function M._open_api_input(record, config)
             local resolved_tc = resolve_paths(tool_call)
             local resolved_fn = resolved_tc["function"] or {}
             if ok_local and local_tools.can_handle(resolved_fn.name) then
-              local result, is_error = local_tools.execute(resolved_tc, { cwd = record.cwd })
-              callback(result, is_error)
+              local function execute_local_tool(allow_shell)
+                local result, is_error = local_tools.execute(resolved_tc, { cwd = record.cwd, allow_shell = allow_shell })
+                callback(result, is_error)
+              end
+
+              if local_tools.requires_permission and local_tools.requires_permission(resolved_tc) then
+                M._request_tool_permission(record, resolved_tc, function(allowed)
+                  if allowed then
+                    execute_local_tool(true)
+                  else
+                    callback("Permission denied for tool: " .. tostring(resolved_fn.name or "unknown"), true)
+                  end
+                end, config)
+              else
+                execute_local_tool(false)
+              end
               return
             end
 
