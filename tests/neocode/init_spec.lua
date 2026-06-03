@@ -48,6 +48,36 @@ describe("neocode.setup", function()
     end)
   end)
 
+  it("validates the full API adapter contract used by session flow", function()
+    assert.has_error(function()
+      neocode.setup({
+        adapters = {
+          api = {
+            name = "api",
+            type = "api",
+            session_store = true,
+            stream = function() end,
+          },
+        },
+      })
+    end, "neocode: adapter 'api' is missing required field 'stream_with_tools'")
+
+    assert.has_no_error(function()
+      neocode.setup({
+        adapters = {
+          api = {
+            name = "api",
+            type = "api",
+            session_store = true,
+            stream = function() end,
+            stream_with_tools = function() end,
+            _build_user_message = function() end,
+          },
+        },
+      })
+    end)
+  end)
+
   it("validates claude adapter fields", function()
     local claude = require("neocode.adapters.claude")
     assert.equals("claude", claude.name)

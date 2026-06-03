@@ -1,7 +1,7 @@
 local M = {}
 
 local REQUIRED_CLI_FIELDS = { "name", "launch_cmd", "interrupt", "attach_image", "session_store" }
-local REQUIRED_API_FIELDS = { "name", "stream", "session_store" }
+local REQUIRED_API_FIELDS = { "name", "stream", "stream_with_tools", "_build_user_message", "session_store" }
 
 local DEFAULT_CONFIG = {
   default_adapter    = "claude",
