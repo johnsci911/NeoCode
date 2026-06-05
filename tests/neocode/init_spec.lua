@@ -48,6 +48,19 @@ describe("neocode.setup", function()
     end)
   end)
 
+  it("registers NeoCode Local as a built-in launcher adapter", function()
+    local claude = require("neocode.adapters.claude")
+
+    neocode.setup({
+      default_adapter = "claude",
+      adapters = { claude = claude },
+    })
+
+    assert.is_table(neocode._config.adapters["local"])
+    assert.equals("local", neocode._config.adapters["local"].name)
+    assert.equals("api", neocode._config.adapters["local"].type)
+  end)
+
   it("validates the full API adapter contract used by session flow", function()
     assert.has_error(function()
       neocode.setup({

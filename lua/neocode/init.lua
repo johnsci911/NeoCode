@@ -20,6 +20,16 @@ local DEFAULT_CONFIG = {
 M._config      = {}
 M._initialized = false
 
+local function register_builtin_adapters(config)
+  config.adapters = config.adapters or {}
+  if not config.adapters["local"] then
+    local ok, local_adapter = pcall(require, "neocode.adapters.local")
+    if ok then
+      config.adapters["local"] = local_adapter
+    end
+  end
+end
+
 local function validate_adapter(name, adapter)
   local fields = adapter.type == "api" and REQUIRED_API_FIELDS or REQUIRED_CLI_FIELDS
   for _, field in ipairs(fields) do
@@ -42,6 +52,7 @@ end
 
 function M.setup(opts)
   M._config = vim.tbl_deep_extend("force", DEFAULT_CONFIG, opts or {})
+  register_builtin_adapters(M._config)
 
   for name, adapter in pairs(M._config.adapters) do
     validate_adapter(name, adapter)
