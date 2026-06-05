@@ -2,7 +2,7 @@
 describe("chat_buffer", function()
   local chat_buffer = require("neocode.chat_buffer")
 
-  it("renders messages as boxed markdown blocks", function()
+  it("renders messages as simple markdown blocks", function()
     local messages = {
       { role = "user", content = "What is 2+2?" },
       { role = "assistant", content = "The answer is **4**." },
@@ -12,8 +12,8 @@ describe("chat_buffer", function()
     local found_user = false
     local found_assistant = false
     for _, line in ipairs(lines) do
-      if line:match("^╭─ You ") then found_user = true end
-      if line:match("^╭─ Assistant ") then found_assistant = true end
+      if line:match("^── You ─") then found_user = true end
+      if line:match("^── Assistant ─") then found_assistant = true end
     end
     assert.is_true(found_user)
     assert.is_true(found_assistant)
@@ -30,23 +30,33 @@ describe("chat_buffer", function()
     })
 
     local text = table.concat(lines, "\n")
-    assert.is_truthy(text:find("╭─ Assistant", 1, true))
+    assert.is_truthy(text:find("── Assistant", 1, true))
     assert.is_truthy(text:find("```lua", 1, true))
     assert.is_truthy(text:find("\nlocal M = {}\n", 1, true))
     assert.is_falsy(text:find("│ local M = {}", 1, true))
   end)
 
-  it("uses only top and bottom separators without side borders", function()
+  it("uses simple horizontal separators without box corners or side borders", function()
     local lines = chat_buffer.render_lines({
       { role = "assistant", content = "Hello!\n\nHow can I help?" },
     })
 
     local text = table.concat(lines, "\n")
-    assert.is_truthy(text:find("╭─ Assistant", 1, true))
-    assert.is_truthy(text:find("╰", 1, true))
+    assert.is_truthy(text:find("── Assistant", 1, true))
+    assert.is_falsy(text:find("╭", 1, true))
+    assert.is_falsy(text:find("╰", 1, true))
     assert.is_truthy(text:find("\nHello!\n", 1, true))
     assert.is_truthy(text:find("\nHow can I help?\n", 1, true))
     assert.is_falsy(text:find("│", 1, true))
+  end)
+
+  it("scales separators to the provided render width", function()
+    local lines = chat_buffer.render_lines({
+      { role = "assistant", content = "Hello!" },
+    }, { width = 120 })
+
+    assert.equals(120, vim.fn.strdisplaywidth(lines[1]))
+    assert.equals(120, vim.fn.strdisplaywidth(lines[#lines]))
   end)
 
   it("reports content ranges for message separators", function()
