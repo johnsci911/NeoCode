@@ -757,9 +757,37 @@ local function clean_reasoning_artifacts(content)
   return normalize_escaped_markdown_fences(cleaned)
 end
 
-function M._clean_api_messages(messages)
-  local save_messages = {}
+function M._strip_image_payloads_from_messages(messages)
+  local stripped_any = false
   for _, msg in ipairs(messages or {}) do
+    if type(msg.content) == "table" then
+      local kept = {}
+      local removed_image = false
+      for _, part in ipairs(msg.content) do
+        if type(part) == "table" and part.type == "image_url" then
+          removed_image = true
+        else
+          table.insert(kept, part)
+        end
+      end
+      if removed_image then
+        stripped_any = true
+        if #kept == 1 and type(kept[1]) == "table" and kept[1].type == "text" then
+          msg.content = kept[1].text or ""
+        else
+          msg.content = kept
+        end
+      end
+    end
+  end
+  return stripped_any
+end
+
+function M._clean_api_messages(messages)
+  local source_messages = vim.deepcopy(messages or {})
+  M._strip_image_payloads_from_messages(source_messages)
+  local save_messages = {}
+  for _, msg in ipairs(source_messages) do
     if not (msg.role == "system" and (msg._is_direct_file_context or msg._is_web_search or msg._is_memory_context or msg._is_skills_context)) then
       local content = msg.content
       if msg.role == "assistant" then
@@ -1420,6 +1448,7 @@ function M._open_api_input(record, config)
       end
 
       local is_first_user_message = not has_user_message(record.messages)
+      M._strip_image_payloads_from_messages(record.messages)
       local user_msg = llama._build_user_message(text, record.pending_image_b64)
       record.pending_image_b64 = nil
       table.insert(record.messages, user_msg)
@@ -1643,6 +1672,8 @@ function M._open_api_input(record, config)
           _stats = stats,
         })
 
+        M._strip_image_payloads_from_messages(record.messages)
+
         chat_buffer.refresh(record.bufnr, record.messages)
 
         M._save_api_messages(config, record, record.messages)
@@ -1864,6 +1895,7 @@ function M._open_api_input(record, config)
 
   local function paste_image()
     local images = require("neocode.images")
+    record.pending_image_b64 = nil
     local path, err = images.save_clipboard(config.data_dir .. "/images", record.id)
     if not path then
       vim.notify(err, vim.log.levels.ERROR)
@@ -1898,6 +1930,9 @@ end
 
 function M._paste_image_api(record, config)
   local images = require("neocode.images")
+  if record then
+    record.pending_image_b64 = nil
+  end
   local path, err = images.save_clipboard(config.data_dir .. "/images", record.id)
   if not path then
     vim.notify(err, vim.log.levels.ERROR)

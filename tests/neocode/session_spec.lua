@@ -587,6 +587,57 @@ describe("session", function()
       { role = "assistant", content = "Example:\n```lua\nprint('ok')\n```" },
     }, messages)
   end)
+
+  it("strips image payloads from saved API messages while keeping text", function()
+    local messages = session._clean_api_messages({
+      {
+        role = "user",
+        content = {
+          { type = "text", text = "look at this" },
+          { type = "image_url", image_url = { url = "data:image/png;base64,abc123" } },
+        },
+      },
+    })
+
+    assert.same({
+      { role = "user", content = "look at this" },
+    }, messages)
+  end)
+
+  it("strips older image payloads from in-memory API history", function()
+    local messages = {
+      {
+        role = "user",
+        content = {
+          { type = "text", text = "first image" },
+          { type = "image_url", image_url = { url = "data:image/png;base64,old" } },
+        },
+      },
+      { role = "assistant", content = "ok" },
+    }
+
+    assert.is_true(session._strip_image_payloads_from_messages(messages))
+    assert.same({ role = "user", content = "first image" }, messages[1])
+    assert.same({ role = "assistant", content = "ok" }, messages[2])
+  end)
+
+  it("strips image payloads before plain follow-up requests", function()
+    local messages = {
+      {
+        role = "user",
+        content = {
+          { type = "text", text = "image question" },
+          { type = "image_url", image_url = { url = "data:image/png;base64,old" } },
+        },
+      },
+    }
+
+    session._strip_image_payloads_from_messages(messages)
+    table.insert(messages, { role = "user", content = "plain follow-up" })
+
+    assert.same({ role = "user", content = "image question" }, messages[1])
+    assert.same({ role = "user", content = "plain follow-up" }, messages[2])
+  end)
 end)
 
 describe("session persistence", function()
