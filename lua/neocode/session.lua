@@ -393,6 +393,75 @@ local function positive_number(value)
   return type(value) == "number" and value > 0
 end
 
+local COMPACT_SUMMARY_SECTIONS = {
+  "Summary",
+  "User Preferences",
+  "Decisions",
+  "Files / Code Context",
+  "Completed",
+  "Open Tasks",
+  "Important Exact Details",
+}
+
+local COMPACT_SUMMARY_INSTRUCTIONS = table.concat({
+  "Summarize the following conversation as durable project memory for a future AI turn.",
+  "Return only markdown with these exact level-2 headings, in this order:",
+  "## Summary",
+  "## User Preferences",
+  "## Decisions",
+  "## Files / Code Context",
+  "## Completed",
+  "## Open Tasks",
+  "## Important Exact Details",
+  "Use concise bullets under each heading. Preserve exact file paths, branch names, commands, model names, user constraints, and unresolved tasks.",
+  "If a section has no known information, write '- Not captured.' Do not invent details.",
+}, "\n")
+
+function M._ensure_structured_compact_summary(summary)
+  local text = tostring(summary or ""):gsub("^%s+", ""):gsub("%s+$", "")
+  if text == "" then return "" end
+
+  local known_sections = {}
+  for _, heading in ipairs(COMPACT_SUMMARY_SECTIONS) do
+    known_sections[heading] = true
+  end
+
+  local buckets = {}
+  local preamble = {}
+  for _, heading in ipairs(COMPACT_SUMMARY_SECTIONS) do
+    buckets[heading] = {}
+  end
+
+  local current_heading = nil
+  for line in (text .. "\n"):gmatch("(.-)\n") do
+    local heading = line:match("^##%s+(.+)$")
+    if heading then
+      heading = heading:gsub("%s+$", "")
+    end
+    if heading and known_sections[heading] then
+      current_heading = heading
+    elseif current_heading then
+      table.insert(buckets[current_heading], line)
+    else
+      table.insert(preamble, line)
+    end
+  end
+
+  local preamble_text = table.concat(preamble, "\n"):gsub("^%s+", ""):gsub("%s+$", "")
+  if preamble_text ~= "" then
+    table.insert(buckets.Summary, 1, preamble_text)
+  end
+
+  local parts = {}
+  for _, heading in ipairs(COMPACT_SUMMARY_SECTIONS) do
+    local content = table.concat(buckets[heading], "\n"):gsub("^%s+", ""):gsub("%s+$", "")
+    if content == "" then content = "- Not captured." end
+    table.insert(parts, "## " .. heading .. "\n" .. content)
+  end
+
+  return table.concat(parts, "\n\n")
+end
+
 function M._auto_compact_context_size(config, record, stats)
   stats = stats or {}
   if positive_number(stats.context_size) then return stats.context_size end
@@ -1073,7 +1142,7 @@ function M._compact_session(record, config)
   end
 
   local summary_prompt = {
-    { role = "system", content = "Summarize the following conversation in 2-3 concise paragraphs. Capture the key topics discussed, any decisions made, important information shared, and ongoing tasks. This summary will replace the full conversation to save context." },
+    { role = "system", content = COMPACT_SUMMARY_INSTRUCTIONS },
     { role = "user", content = table.concat(conversation_text, "\n") },
   }
 
@@ -1083,7 +1152,7 @@ function M._compact_session(record, config)
     messages = summary_prompt,
     stream = false,
     temperature = 0.3,
-    max_tokens = 500,
+    max_tokens = 900,
     enable_thinking = false,
     chat_template_kwargs = { enable_thinking = false },
   })
@@ -1119,6 +1188,7 @@ function M._compact_session(record, config)
           summary = summary:gsub("<think>.+</think>", "")
           summary = summary:gsub("<think>.*$", "") -- unclosed think block
           summary = summary:gsub("^%s+", ""):gsub("%s+$", "")
+          summary = M._ensure_structured_compact_summary(summary)
         elseif ok and result and result.error then
           record._auto_compact_running = false
           vim.notify("neocode: compact failed — " .. tostring(result.error.message or result.error), vim.log.levels.WARN)

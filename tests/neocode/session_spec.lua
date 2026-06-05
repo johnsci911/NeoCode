@@ -379,6 +379,41 @@ describe("session", function()
       }, session._auto_compact_messages_to_summarize(messages, 1))
     end)
 
+    it("repairs compact summaries that miss required durable sections", function()
+      local summary = session._ensure_structured_compact_summary("Already captured detail.")
+
+      assert.is_truthy(summary:find("## Summary", 1, true))
+      assert.is_truthy(summary:find("Already captured detail.", 1, true))
+      assert.is_truthy(summary:find("## User Preferences\n- Not captured.", 1, true))
+      assert.is_truthy(summary:find("## Decisions\n- Not captured.", 1, true))
+      assert.is_truthy(summary:find("## Files / Code Context\n- Not captured.", 1, true))
+      assert.is_truthy(summary:find("## Completed\n- Not captured.", 1, true))
+      assert.is_truthy(summary:find("## Open Tasks\n- Not captured.", 1, true))
+      assert.is_truthy(summary:find("## Important Exact Details\n- Not captured.", 1, true))
+    end)
+
+    it("reorders compact summary sections and trims heading whitespace", function()
+      local summary = session._ensure_structured_compact_summary(table.concat({
+        "Loose preamble detail.",
+        "## Open Tasks  ",
+        "- Finish verification.",
+        "## Decisions",
+        "- Preserve main on a feature branch.",
+      }, "\n"))
+
+      local summary_pos = summary:find("## Summary", 1, true)
+      local decisions_pos = summary:find("## Decisions", 1, true)
+      local open_tasks_pos = summary:find("## Open Tasks", 1, true)
+      assert.is_truthy(summary_pos)
+      assert.is_truthy(decisions_pos)
+      assert.is_truthy(open_tasks_pos)
+      assert.is_true(summary_pos < decisions_pos)
+      assert.is_true(decisions_pos < open_tasks_pos)
+      assert.is_truthy(summary:find("Loose preamble detail.", 1, true))
+      assert.is_truthy(summary:find("## Decisions\n- Preserve main on a feature branch.", 1, true))
+      assert.is_truthy(summary:find("## Open Tasks\n- Finish verification.", 1, true))
+    end)
+
     it("continues from compacted summary and clears stale high-context usage", function()
       local tmp_dir = vim.fn.tempname()
       vim.fn.mkdir(tmp_dir, "p")
@@ -419,10 +454,20 @@ describe("session", function()
         assert.is_false(payload.enable_thinking)
         assert.is_table(payload.chat_template_kwargs)
         assert.is_false(payload.chat_template_kwargs.enable_thinking)
+        assert.equals(900, payload.max_tokens)
+        assert.is_table(payload.messages)
+        assert.is_truthy(payload.messages[1].content:find("Return only markdown with these exact level%-2 headings", 1, false))
+        assert.is_truthy(payload.messages[1].content:find("## Summary", 1, true))
+        assert.is_truthy(payload.messages[1].content:find("## User Preferences", 1, true))
+        assert.is_truthy(payload.messages[1].content:find("## Decisions", 1, true))
+        assert.is_truthy(payload.messages[1].content:find("## Files / Code Context", 1, true))
+        assert.is_truthy(payload.messages[1].content:find("## Completed", 1, true))
+        assert.is_truthy(payload.messages[1].content:find("## Open Tasks", 1, true))
+        assert.is_truthy(payload.messages[1].content:find("## Important Exact Details", 1, true))
         opts.on_stdout(1, {
           vim.fn.json_encode({
             choices = {
-              { message = { content = "Compacted summary of the old conversation." } },
+              { message = { content = "## Summary\n- Compacted summary of the old conversation.\n\n## Open Tasks\n- Continue from recent question." } },
             },
           }),
         })
@@ -437,7 +482,7 @@ describe("session", function()
 
         assert.are.same({
           { role = "user", content = "Summarize our conversation so far." },
-          { role = "assistant", content = "Here is a summary of our conversation:\n\nCompacted summary of the old conversation." },
+          { role = "assistant", content = "Here is a summary of our conversation:\n\n## Summary\n- Compacted summary of the old conversation.\n\n## User Preferences\n- Not captured.\n\n## Decisions\n- Not captured.\n\n## Files / Code Context\n- Not captured.\n\n## Completed\n- Not captured.\n\n## Open Tasks\n- Continue from recent question.\n\n## Important Exact Details\n- Not captured." },
           { role = "user", content = "recent question" },
           { role = "assistant", content = "recent answer" },
         }, record.messages)
@@ -445,7 +490,7 @@ describe("session", function()
         assert.is_false(record._auto_compact_pending)
         assert.is_false(record._auto_compact_running)
         local saved = session._load_api_messages(config, record)
-        assert.equals("Here is a summary of our conversation:\n\nCompacted summary of the old conversation.", saved[2].content)
+        assert.equals("Here is a summary of our conversation:\n\n## Summary\n- Compacted summary of the old conversation.\n\n## User Preferences\n- Not captured.\n\n## Decisions\n- Not captured.\n\n## Files / Code Context\n- Not captured.\n\n## Completed\n- Not captured.\n\n## Open Tasks\n- Continue from recent question.\n\n## Important Exact Details\n- Not captured.", saved[2].content)
       end)
 
       vim.fn.jobstart = original_jobstart
