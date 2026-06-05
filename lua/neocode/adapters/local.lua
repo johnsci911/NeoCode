@@ -279,6 +279,4 @@ end
 
 M._request_payload = request_payload
 
-M.setup({})
-
 return M
