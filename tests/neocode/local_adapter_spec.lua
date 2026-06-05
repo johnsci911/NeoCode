@@ -114,6 +114,22 @@ describe("local adapter", function()
     assert.equals(125, stats.usage.total_tokens)
   end)
 
+  it("strips leaked local thinking and chat-template preambles from responses", function()
+    local_adapter.setup({ provider = "llama_server", model = "local-model" })
+
+    local text = local_adapter._complete_from_result({
+      choices = {
+        {
+          message = {
+            content = "<think>planning hidden answer</think>\n--? pleee- de- de- de- It looks like final answer text.",
+          },
+        },
+      },
+    })
+
+    assert.equals("It looks like final answer text.", text)
+  end)
+
   it("surfaces API errors instead of returning blank completions", function()
     local text, stats = local_adapter._complete_from_result({
       error = { message = "model not found" },

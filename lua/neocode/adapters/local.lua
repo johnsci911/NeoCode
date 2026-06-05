@@ -26,6 +26,38 @@ local function ensure_setup()
   if not M.config then M.setup({}) end
 end
 
+local function trim_response(text)
+  return (text:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function strip_leaked_preamble(text)
+  local first_line = text:match("^([^\n]*)") or text
+  local noisy_prefix = first_line:match("^%s*[%p%c]*[%w%p%s]-[%w]%-[%w]%-")
+    or first_line:match("^%s*[%p%c]*[%w%p%s]-%-.-%-.-%-.-%-")
+  if not noisy_prefix then return text end
+
+  local starts = { "It%s+", "Here%s+", "To%s+", "The%s+", "This%s+", "For%s+", "If%s+", "You%s+", "I%s+" }
+  for _, pattern in ipairs(starts) do
+    local start_at = text:find(pattern, 12)
+    if start_at then return text:sub(start_at) end
+  end
+  return text
+end
+
+local function strip_thinking(text)
+  if type(text) ~= "string" or text == "" then return "" end
+  local cleaned = text:gsub("\r\n", "\n")
+  cleaned = cleaned:gsub("<[Tt][Hh][Ii][Nn][Kk]>.-</[Tt][Hh][Ii][Nn][Kk]>", "")
+  cleaned = cleaned:gsub("<analysis>.-</analysis>", "")
+  cleaned = cleaned:gsub("<reasoning>.-</reasoning>", "")
+  cleaned = cleaned:gsub("<｜begin▁of▁sentence｜>", "")
+  cleaned = cleaned:gsub("<|start_header_id|>assistant<|end_header_id|>", "")
+  cleaned = cleaned:gsub("<|eot_id|>", "")
+  cleaned = trim_response(cleaned)
+  cleaned = strip_leaked_preamble(cleaned)
+  return trim_response(cleaned)
+end
+
 function M.setup(opts)
   opts = opts or {}
   local explicit_model = opts.model ~= nil
@@ -81,7 +113,7 @@ local function response_text_from_result(result)
   end
   local choice = result.choices and result.choices[1]
   local message = choice and choice.message or {}
-  return message.content or message.reasoning_content or result.content or ""
+  return strip_thinking(message.content or result.content or "")
 end
 
 local function message_from_result(result)
