@@ -93,6 +93,11 @@ function M.paste(adapter, session, config)
     return
   end
 
+  if session.pending_image then
+    M.delete_temp(session.pending_image)
+    session.pending_image = nil
+  end
+
   local path, err = M.save_clipboard(config.data_dir .. "/images", session.id)
   if not path then
     vim.notify(err, vim.log.levels.ERROR)
