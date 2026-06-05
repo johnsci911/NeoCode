@@ -389,6 +389,19 @@ local function has_user_message(messages)
   return false
 end
 
+function M._auto_title_from_first_user_message(record, text, config, is_first_user_message)
+  if not is_first_user_message or not record or type(text) ~= "string" then return false end
+  local title = text:gsub("\n", " "):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+  if #title > 50 then title = title:sub(1, 47) .. "..." end
+  if title == "" then return false end
+  record.title = title
+  M._persist(config)
+  if record.api_adapter and record.messages and #record.messages > 0 then
+    M._save_api_messages(config, record, record.messages)
+  end
+  return true
+end
+
 local function positive_number(value)
   return type(value) == "number" and value > 0
 end
@@ -598,6 +611,38 @@ local function _write_sessions_json(path, list)
   end
 end
 
+local function _read_json_file(path)
+  local f = io.open(path, "r")
+  if not f then return nil end
+  local raw = f:read("*a")
+  f:close()
+  local ok, data = pcall(vim.fn.json_decode, raw)
+  if ok and type(data) == "table" then return data end
+  return nil
+end
+
+local function _should_keep_session(config, record)
+  if not record or not record.id or not record.adapter then return false end
+  local adapters = config.adapters or {}
+  local adapter = adapters[record.adapter]
+  return not adapter or adapter.session_store ~= false
+end
+
+local function _load_layered_session_meta(config)
+  local projects_dir = config.data_dir .. "/projects"
+  local pattern = projects_dir .. "/*/sessions/*/meta.json"
+  local paths = vim.fn.glob(pattern, false, true)
+  local sessions = {}
+  for _, path in ipairs(paths or {}) do
+    local meta = _read_json_file(path)
+    if _should_keep_session(config, meta) then
+      meta.status = meta.status or "closed"
+      table.insert(sessions, meta)
+    end
+  end
+  return sessions
+end
+
 function M._persist(config)
   if not config or not config.data_dir then return end
 
@@ -635,21 +680,31 @@ end
 
 function M.load_all_from_disk(config)
   if not config or not config.data_dir then return {} end
-  local f = io.open(_sessions_path(config))
-  if not f then return {} end
-  local ok, data = pcall(vim.fn.json_decode, f:read("*a"))
-  f:close()
-  if not ok or type(data) ~= "table" then return {} end
+  local data = _read_json_file(_sessions_path(config)) or {}
+  local by_id = {}
+  local order = {}
 
-  local adapters = config.adapters or {}
-  local filtered = {}
-  for _, s in ipairs(data) do
-    local adapter = adapters[s.adapter]
-    if not adapter or adapter.session_store ~= false then
-      table.insert(filtered, s)
+  local function add_or_replace(record)
+    if not _should_keep_session(config, record) then return end
+    if not by_id[record.id] then
+      table.insert(order, record.id)
     end
+    by_id[record.id] = record
   end
-  return filtered
+
+  for _, s in ipairs(data) do
+    add_or_replace(s)
+  end
+
+  for _, s in ipairs(_load_layered_session_meta(config)) do
+    add_or_replace(s)
+  end
+
+  local sessions = {}
+  for _, id in ipairs(order) do
+    table.insert(sessions, by_id[id])
+  end
+  return sessions
 end
 
 function M._store_for_record(config, record)
@@ -1364,20 +1419,14 @@ function M._open_api_input(record, config)
         table.insert(record.messages, skills_context)
       end
 
+      local is_first_user_message = not has_user_message(record.messages)
       local user_msg = llama._build_user_message(text, record.pending_image_b64)
       record.pending_image_b64 = nil
       table.insert(record.messages, user_msg)
       M._append_transcript(config, record, user_msg)
 
       -- Auto-title from first user message
-      if not has_user_message(record.messages) and type(text) == "string" then
-        local title = text:gsub("\n", " "):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
-        if #title > 50 then title = title:sub(1, 47) .. "..." end
-        if title ~= "" then
-          record.title = title
-          M._persist(config)
-        end
-      end
+      M._auto_title_from_first_user_message(record, text, config, is_first_user_message)
 
       chat_buffer.refresh(record.bufnr, record.messages)
 

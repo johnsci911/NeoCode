@@ -653,6 +653,27 @@ describe("session persistence", function()
     assert.equals("/tmp/project-root", all[1].cwd)
   end)
 
+  it("auto-titles API sessions from the captured first user message", function()
+    local cfg = {
+      data_dir = tmp_dir,
+      adapters = {
+        ["local"] = { name = "local", type = "api", session_store = true },
+      },
+    }
+    local s = session._new_record("local", "local 1")
+    s.cwd = "/tmp/neocode-project"
+    s.api_adapter = cfg.adapters["local"]
+    s.messages = { { role = "user", content = "Can you analyze this project?" } }
+    session._add(s)
+
+    assert.is_true(session._auto_title_from_first_user_message(s, "Can you analyze this project?", cfg, true))
+
+    local all = session.load_all_from_disk(cfg)
+    assert.equals(1, #all)
+    assert.equals("Can you analyze this project?", all[1].title)
+    assert.equals("Can you analyze this project?", session._store_for_record(cfg, s).load_meta(s.id).title)
+  end)
+
   it("_persist() writes private sessions.json", function()
     local s = session._new_record("claude", "Private metadata")
     session._add(s)
@@ -702,6 +723,63 @@ describe("session disk operations", function()
     assert.equals(0, #all)
   end)
 
+  it("load_all_from_disk() discovers project-scoped API session metadata without sessions.json", function()
+    local store = require("neocode.session_store").new({
+      data_dir = tmp_dir,
+      cwd = "/tmp/neocode-project",
+    })
+    store.save_meta({
+      id = "layered-session",
+      adapter = "local",
+      title = "Neocode-Test",
+      status = "active",
+      created_at = 42,
+      cwd = "/tmp/neocode-project",
+    })
+    store.save_messages("layered-session", { { role = "user", content = "hello" } })
+
+    local all = session.load_all_from_disk({
+      data_dir = tmp_dir,
+      adapters = { ["local"] = { name = "local", type = "api", session_store = true } },
+    })
+
+    assert.equals(1, #all)
+    assert.equals("layered-session", all[1].id)
+    assert.equals("Neocode-Test", all[1].title)
+    assert.equals("/tmp/neocode-project", all[1].cwd)
+  end)
+
+  it("load_all_from_disk() prefers layered API metadata over stale sessions.json entries", function()
+    local f = io.open(tmp_dir .. "/sessions.json", "w")
+    f:write(vim.fn.json_encode({
+      { id = "same-session", adapter = "local", title = "local 1", status = "active", created_at = 1, cwd = "/tmp/old" },
+    }))
+    f:close()
+
+    local store = require("neocode.session_store").new({
+      data_dir = tmp_dir,
+      cwd = "/tmp/new-project",
+    })
+    store.save_meta({
+      id = "same-session",
+      adapter = "local",
+      title = "Neocode-Test",
+      status = "active",
+      created_at = 2,
+      cwd = "/tmp/new-project",
+    })
+
+    local all = session.load_all_from_disk({
+      data_dir = tmp_dir,
+      adapters = { ["local"] = { name = "local", type = "api", session_store = true } },
+    })
+
+    assert.equals(1, #all)
+    assert.equals("Neocode-Test", all[1].title)
+    assert.equals("/tmp/new-project", all[1].cwd)
+    assert.equals(2, all[1].created_at)
+  end)
+
   it("load_all_from_disk() hides stale sessions for adapters with session_store = false", function()
     local f = io.open(tmp_dir .. "/sessions.json", "w")
     f:write(vim.fn.json_encode({
@@ -745,6 +823,28 @@ describe("session disk operations", function()
     assert.equals(0, vim.fn.isdirectory(store.session_dir(s.id)))
   end)
 
+  it("delete_from_disk() removes layered sessions discovered from their original cwd", function()
+    local original = {
+      id = "cross-cwd-delete",
+      adapter = "local",
+      title = "Delete cross cwd",
+      status = "active",
+      created_at = 3,
+      cwd = "/tmp/original-project",
+    }
+    local store = require("neocode.session_store").new({ data_dir = tmp_dir, cwd = original.cwd })
+    store.save_meta(original)
+    store.save_messages(original.id, { { role = "user", content = "from original cwd" } })
+    assert.equals(1, vim.fn.isdirectory(store.session_dir(original.id)))
+
+    session.delete_from_disk(original.id, {
+      data_dir = tmp_dir,
+      adapters = { ["local"] = { name = "local", type = "api", session_store = true } },
+    })
+
+    assert.equals(0, vim.fn.isdirectory(store.session_dir(original.id)))
+  end)
+
   it("rename_on_disk() updates session title", function()
     local s = session._new_record("claude", "Old name")
     session._add(s)
@@ -765,6 +865,26 @@ describe("session disk operations", function()
 
     local meta = session._store_for_record(config, s).load_meta(s.id)
     assert.equals("New name", meta.title)
+  end)
+
+  it("rename_on_disk() updates layered sessions discovered from their original cwd", function()
+    local original = {
+      id = "cross-cwd-rename",
+      adapter = "local",
+      title = "Old cross cwd name",
+      status = "active",
+      created_at = 4,
+      cwd = "/tmp/original-project",
+    }
+    local store = require("neocode.session_store").new({ data_dir = tmp_dir, cwd = original.cwd })
+    store.save_meta(original)
+
+    session.rename_on_disk(original.id, "New cross cwd name", {
+      data_dir = tmp_dir,
+      adapters = { ["local"] = { name = "local", type = "api", session_store = true } },
+    })
+
+    assert.equals("New cross cwd name", store.load_meta(original.id).title)
   end)
 end)
 
@@ -871,6 +991,19 @@ describe("api session layered store integration", function()
     }
 
     assert.equals("from original cwd", session._load_api_messages(config, resumed)[1].content)
+  end)
+
+  it("loads discovered layered API messages using the metadata cwd instead of current cwd", function()
+    local r = record()
+    session._save_api_messages(config, r, { { role = "user", content = "from original cwd" } })
+
+    local discovered = session.load_all_from_disk({
+      data_dir = tmp_dir,
+      adapters = { llama = { name = "llama", type = "api", session_store = true } },
+    })[1]
+
+    assert.equals(r.cwd, discovered.cwd)
+    assert.equals("from original cwd", session._load_api_messages(config, discovered)[1].content)
   end)
 
   it("resume_api uses persisted cwd when rebuilding an API session", function()
