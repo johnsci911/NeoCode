@@ -23,7 +23,7 @@ describe("local workspace tools", function()
       table.insert(names, schema["function"].name)
     end
 
-    assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files", "neocode__run_shell_command" }, names)
+    assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files", "neocode__write_file", "neocode__run_shell_command" }, names)
     assert.equals("function", schemas[1].type)
     assert.is_not_nil(schemas[1]["function"].parameters.properties.path)
   end)
@@ -140,6 +140,31 @@ describe("local workspace tools", function()
     assert.is_false(is_error)
     assert.is_truthy(result:find("README.md:2:", 1, true))
     assert.is_truthy(result:find("lua/init.lua:1:", 1, true))
+  end)
+
+  it("writes text files inside the workspace", function()
+    local result, is_error = local_tools.execute({
+      ["function"] = {
+        name = "neocode__write_file",
+        arguments = vim.fn.json_encode({ path = "qa/output.lua", content = "return 'ok'\n", create_dirs = true }),
+      },
+    }, { cwd = tmp_dir })
+
+    assert.is_false(is_error)
+    assert.is_truthy(result:find("qa/output.lua", 1, true))
+    assert.equals("return 'ok'", vim.fn.readfile(tmp_dir .. "/qa/output.lua")[1])
+  end)
+
+  it("rejects writes outside the workspace root", function()
+    local result, is_error = local_tools.execute({
+      ["function"] = {
+        name = "neocode__write_file",
+        arguments = vim.fn.json_encode({ path = "/tmp/neocode_outside.lua", content = "return false\n" }),
+      },
+    }, { cwd = tmp_dir })
+
+    assert.is_true(is_error)
+    assert.is_truthy(result:find("outside workspace", 1, true))
   end)
 
   it("caps search results and scanned files", function()

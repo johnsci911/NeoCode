@@ -467,6 +467,17 @@ function M._compact_endpoint_config(record)
   return cfg
 end
 
+function M._compact_chat_url(record)
+  local adapter = record and record.api_adapter
+  if adapter and adapter.provider and adapter.provider.chat_completions_url then
+    return adapter.provider:chat_completions_url()
+  end
+  local cfg = M._compact_endpoint_config(record)
+  if not cfg then return nil end
+  local base = cfg.base_url:gsub("/+$", ""):gsub("/v1$", "")
+  return base .. "/v1/chat/completions"
+end
+
 function M._auto_compact_recent_messages(messages, preserve_recent_turns)
   if not positive_number(preserve_recent_turns) then return {} end
 
@@ -1066,7 +1077,7 @@ function M._compact_session(record, config)
     { role = "user", content = table.concat(conversation_text, "\n") },
   }
 
-  local url = cfg.base_url .. "/v1/chat/completions"
+  local url = M._compact_chat_url(record)
   local payload = vim.fn.json_encode({
     model = cfg.model,
     messages = summary_prompt,
@@ -1405,6 +1416,7 @@ function M._open_api_input(record, config)
 
       local auto_continue_count = 0
       local max_auto_continues = 3
+      local tool_stream_opts = nil
 
       local function on_complete(response_text, stats, _tool_calls)
         spinner_active = false
@@ -1483,7 +1495,7 @@ function M._open_api_input(record, config)
           phase_start = vim.uv.hrtime()
 
           table.insert(record.messages, { role = "assistant", content = "" })
-          record.job_id = llama.stream(record.messages, record.bufnr, function(cont_text, cont_stats)
+          local function on_continued(cont_text, cont_stats)
             -- Merge continued response
             for i = #record.messages, 1, -1 do
               if record.messages[i].role == "assistant" then
@@ -1494,7 +1506,12 @@ function M._open_api_input(record, config)
             end
             -- Check again for truncation (recursive via on_complete)
             on_complete(cont_text, cont_stats, nil)
-          end)
+          end
+          if tools and #tools > 0 and tool_stream_opts then
+            record.job_id = llama.stream_with_tools(record.messages, record.bufnr, on_continued, tool_stream_opts)
+          else
+            record.job_id = llama.stream(record.messages, record.bufnr, on_continued)
+          end
           return
         end
 
@@ -1527,7 +1544,7 @@ function M._open_api_input(record, config)
         -- Use agentic tool-call loop
         local ok_local, local_tools = pcall(require, "neocode.local_tools")
 
-        record.job_id = llama.stream_with_tools(record.messages, record.bufnr, on_complete, {
+        tool_stream_opts = {
           tools = tools,
           cwd = record.cwd,
           on_tool_call = function(tool_call, callback)
@@ -1663,7 +1680,8 @@ function M._open_api_input(record, config)
               end
             end
           end,
-        })
+        }
+        record.job_id = llama.stream_with_tools(record.messages, record.bufnr, on_complete, tool_stream_opts)
       else
         -- No tools: use normal streaming
         record.job_id = llama.stream(record.messages, record.bufnr, function(response_text, stats)

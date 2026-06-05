@@ -309,4 +309,80 @@ describe("local adapter", function()
 
     assert.equals("Here is tool setup.", requests[2].messages[2].content)
   end)
+
+  it("continues multi-round tool loops through write-file calls", function()
+    local_adapter.setup({ model = "local-model", max_tool_rounds = 3 })
+    local requests = {}
+    local_adapter._transport = function(messages, extra, callback)
+      table.insert(requests, { messages = vim.deepcopy(messages), extra = extra })
+      if #requests == 1 then
+        callback({
+          choices = {
+            {
+              message = {
+                content = "I'll create the file.",
+                tool_calls = {
+                  {
+                    id = "write_1",
+                    type = "function",
+                    ["function"] = {
+                      name = "neocode__write_file",
+                      arguments = vim.fn.json_encode({ path = "qa/example.lua", content = "return 42\n", create_dirs = true }),
+                    },
+                  },
+                },
+              },
+            },
+          },
+        })
+      elseif #requests == 2 then
+        callback({
+          choices = {
+            {
+              message = {
+                content = "I'll verify it.",
+                tool_calls = {
+                  {
+                    id = "read_1",
+                    type = "function",
+                    ["function"] = {
+                      name = "neocode__read_file",
+                      arguments = vim.fn.json_encode({ path = "qa/example.lua" }),
+                    },
+                  },
+                },
+              },
+            },
+          },
+        })
+      else
+        callback({ choices = { { message = { content = "Created and verified." } } } })
+      end
+      return 77
+    end
+
+    local completed_text = nil
+    local called = {}
+    local_adapter.stream_with_tools({
+      { role = "user", content = "Create qa/example.lua" },
+    }, nil, function(text)
+      completed_text = text
+    end, {
+      tools = {
+        { type = "function", ["function"] = { name = "neocode__write_file" } },
+        { type = "function", ["function"] = { name = "neocode__read_file" } },
+      },
+      on_tool_call = function(tool_call, callback)
+        table.insert(called, tool_call.id)
+        callback("ok", false)
+      end,
+    })
+    local_adapter._transport = nil
+
+    assert.same({ "write_1", "read_1" }, called)
+    assert.equals(3, #requests)
+    assert.equals("tool", requests[2].messages[3].role)
+    assert.equals("tool", requests[3].messages[5].role)
+    assert.equals("Created and verified.", completed_text)
+  end)
 end)

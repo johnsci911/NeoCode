@@ -103,6 +103,36 @@ local function resolve_path(path, cwd)
   return nil, "path is outside workspace: " .. tostring(path or ".")
 end
 
+local function resolve_write_path(path, cwd, create_dirs)
+  local root = normalize_root(cwd)
+  if type(path) ~= "string" or path == "" then
+    return nil, "missing path"
+  end
+  if path:match("/$") then
+    return nil, "path must be a file, not a directory"
+  end
+
+  local p = path
+  if p:match("^~/") then
+    p = vim.fn.expand(p)
+  elseif not p:match("^/") then
+    p = root .. "/" .. p
+  end
+
+  local parent = vim.fn.fnamemodify(p, ":h")
+  if create_dirs then
+    vim.fn.mkdir(parent, "p")
+  end
+  local real_parent = uv().fs_realpath(parent)
+  if not real_parent then
+    return nil, "parent directory not found: " .. parent
+  end
+  if not (real_parent == root or real_parent:sub(1, #root + 1) == root .. "/") then
+    return nil, "path is outside workspace: " .. tostring(path)
+  end
+  return real_parent .. "/" .. vim.fn.fnamemodify(p, ":t"), nil, root
+end
+
 local function relpath(path, root)
   if path == root then return "." end
   if path:sub(1, #root + 1) == root .. "/" then
@@ -170,6 +200,11 @@ function M.get_tools()
       max_results = { type = "number", description = "Maximum matches to return. Default 50." },
       max_files = { type = "number", description = "Maximum text files to scan. Default 500." },
     }, { "query" }),
+    schema("write_file", "Write a text file inside the local workspace. Use for creating or replacing files the user requested.", {
+      path = { type = "string", description = "Workspace-relative or absolute path inside the workspace." },
+      content = { type = "string", description = "Complete text content to write." },
+      create_dirs = { type = "boolean", description = "Create missing parent directories. Default false." },
+    }, { "path", "content" }),
     schema("run_shell_command", "Run a shell command in the local workspace. Unsafe commands require user approval.", {
       command = { type = "string", description = "Shell command to run." },
     }, { "command" }),
@@ -180,6 +215,7 @@ function M.can_handle(name)
   return name == "neocode__read_file"
     or name == "neocode__list_directory"
     or name == "neocode__search_files"
+    or name == "neocode__write_file"
     or name == "neocode__run_shell_command"
 end
 
@@ -302,6 +338,23 @@ local function search_files(args, opts)
   return table.concat(results, "\n"), false
 end
 
+local function write_file(args, opts)
+  local content = args.content
+  if type(content) ~= "string" then return "Error: missing content", true end
+  if content:find("\0", 1, true) then return "Error: content appears to be binary", true end
+  if #content > 200000 then return "Error: content is too large", true end
+
+  local path, err, root = resolve_write_path(args.path, opts.cwd, args.create_dirs == true)
+  if not path then return "Error: " .. err, true end
+  if not is_text_file(path) then return "Error: refusing to write non-text extension: " .. tostring(args.path), true end
+
+  local f = io.open(path, "wb")
+  if not f then return "Error: could not open file for writing", true end
+  f:write(content)
+  f:close()
+  return string.format("Wrote file: %s (%d bytes)", relpath(path, root), #content), false
+end
+
 local function run_shell_command(args, opts)
   local command = normalize_command(args.command)
   if command == "" then return "Error: missing command", true end
@@ -349,6 +402,8 @@ function M.execute(tool_call, opts)
     return list_directory(args, opts)
   elseif name == "neocode__search_files" then
     return search_files(args, opts)
+  elseif name == "neocode__write_file" then
+    return write_file(args, opts)
   elseif name == "neocode__run_shell_command" then
     return run_shell_command(args, opts)
   end

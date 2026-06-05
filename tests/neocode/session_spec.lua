@@ -50,7 +50,7 @@ describe("session", function()
         table.insert(names, schema["function"].name)
       end
 
-      assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files", "neocode__run_shell_command" }, names)
+      assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files", "neocode__write_file", "neocode__run_shell_command" }, names)
     end)
 
     it("offers web search as a model-chosen tool for current-info prompts", function()
@@ -65,7 +65,7 @@ describe("session", function()
         table.insert(names, schema["function"].name)
       end
 
-      assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files", "neocode__run_shell_command" }, names)
+      assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files", "neocode__write_file", "neocode__run_shell_command" }, names)
     end)
 
     it("keeps README update prompts on local tools", function()
@@ -75,7 +75,7 @@ describe("session", function()
         table.insert(names, schema["function"].name)
       end
 
-      assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files", "neocode__run_shell_command" }, names)
+      assert.same({ "neocode__read_file", "neocode__list_directory", "neocode__search_files", "neocode__write_file", "neocode__run_shell_command" }, names)
     end)
   end)
 
@@ -299,6 +299,15 @@ describe("session", function()
       assert.is_nil(session._compact_endpoint_config({ api_adapter = { name = "cli" } }))
 
       assert.are.same({ base_url = "http://127.0.0.1:8080", model = "local" }, session._compact_endpoint_config({
+        api_adapter = { config = { base_url = "http://127.0.0.1:8080", model = "local" } },
+      }))
+    end)
+
+    it("builds compact chat URLs without duplicating v1", function()
+      assert.equals("http://127.0.0.1:8080/v1/chat/completions", session._compact_chat_url({
+        api_adapter = { config = { base_url = "http://127.0.0.1:8080/v1", model = "local" } },
+      }))
+      assert.equals("http://127.0.0.1:8080/v1/chat/completions", session._compact_chat_url({
         api_adapter = { config = { base_url = "http://127.0.0.1:8080", model = "local" } },
       }))
     end)
