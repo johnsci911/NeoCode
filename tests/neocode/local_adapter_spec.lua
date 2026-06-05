@@ -96,6 +96,29 @@ describe("local adapter", function()
     assert.equals("neocode__read_file", payload.tools[1]["function"].name)
   end)
 
+  it("sanitizes corrupted assistant history before building request payloads", function()
+    local_adapter.setup({ model = "local-model" })
+
+    local payload = local_adapter._request_payload({
+      { role = "user", content = "hello" },
+      {
+        role = "assistant",
+        content = "<|channel>thought\n<channel|>�\nthought-thought-thought-thought-thought-thought-thought-thought",
+      },
+      {
+        role = "assistant",
+        content = "<|channel>thought garbage <|start_header_id|>assistant<|end_header_id|>Here is the useful answer.",
+      },
+      { role = "user", content = "continue" },
+    })
+
+    assert.equals(3, #payload.messages)
+    assert.equals("user", payload.messages[1].role)
+    assert.equals("assistant", payload.messages[2].role)
+    assert.equals("Here is the useful answer.", payload.messages[2].content)
+    assert.equals("user", payload.messages[3].role)
+  end)
+
   it("extracts response text and context stats from OpenAI responses", function()
     local_adapter.setup({ provider = "llama_server", model = "local-model", context_size = 24576 })
 
@@ -128,6 +151,22 @@ describe("local adapter", function()
     })
 
     assert.equals("It looks like final answer text.", text)
+  end)
+
+  it("strips reserved channel-thought artifacts from responses", function()
+    local_adapter.setup({ provider = "llama_server", model = "local-model" })
+
+    local text = local_adapter._complete_from_result({
+      choices = {
+        {
+          message = {
+            content = "<|channel>thought\n<channel|>�\nthought-thought-thought-thought-thought-thought-thought-thought\nHere is the final response.",
+          },
+        },
+      },
+    })
+
+    assert.equals("Here is the final response.", text)
   end)
 
   it("surfaces API errors instead of returning blank completions", function()
@@ -207,5 +246,51 @@ describe("local adapter", function()
     assert.equals("README content", requests[2].messages[3].content)
     assert.equals("running", displayed[1].status)
     assert.equals("done", displayed[2].status)
+  end)
+
+  it("sanitizes assistant tool-call content before follow-up tool requests", function()
+    local_adapter.setup({ model = "local-model" })
+    local requests = {}
+    local_adapter._transport = function(messages, extra, callback)
+      table.insert(requests, { messages = vim.deepcopy(messages), extra = extra })
+      if #requests == 1 then
+        callback({
+          choices = {
+            {
+              message = {
+                content = "<|channel>thought repeated-thought-thought-thought-thought Here is tool setup.",
+                tool_calls = {
+                  {
+                    id = "call_1",
+                    type = "function",
+                    ["function"] = {
+                      name = "neocode__read_file",
+                      arguments = vim.fn.json_encode({ path = "README.md" }),
+                    },
+                  },
+                },
+              },
+            },
+          },
+        })
+      else
+        callback({ choices = { { message = { content = "done" } } } })
+      end
+      return 77
+    end
+
+    local_adapter.stream_with_tools({
+      { role = "user", content = "read README" },
+    }, nil, function() end, {
+      tools = {
+        { type = "function", ["function"] = { name = "neocode__read_file" } },
+      },
+      on_tool_call = function(_, callback)
+        callback("README content", false)
+      end,
+    })
+    local_adapter._transport = nil
+
+    assert.equals("Here is tool setup.", requests[2].messages[2].content)
   end)
 end)

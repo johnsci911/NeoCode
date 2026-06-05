@@ -580,11 +580,47 @@ function M._store_for_record(config, record)
   })
 end
 
+local function clean_reasoning_artifacts(content)
+  if type(content) ~= "string" or content == "" then return content end
+  local cleaned = content:gsub("\r\n", "\n")
+  local had_reserved = cleaned:find("<|channel>thought", 1, true)
+    or cleaned:find("<|channel|>thought", 1, true)
+    or cleaned:find("<channel|>", 1, true)
+    or cleaned:find("<|start_header_id|>", 1, true)
+
+  cleaned = cleaned:gsub("<[Tt][Hh][Ii][Nn][Kk]>.-</[Tt][Hh][Ii][Nn][Kk]>", "")
+  cleaned = cleaned:gsub("<[Tt][Hh][Ii][Nn][Kk]>.*$", "")
+  cleaned = cleaned:gsub("<analysis>.-</analysis>", "")
+  cleaned = cleaned:gsub("<analysis>.*$", "")
+  cleaned = cleaned:gsub("<reasoning>.-</reasoning>", "")
+  cleaned = cleaned:gsub("<reasoning>.*$", "")
+  cleaned = cleaned:gsub("<｜begin▁of▁sentence｜>", "")
+  cleaned = cleaned:gsub("<|start_header_id|>assistant<|end_header_id|>", "")
+  cleaned = cleaned:gsub("<|eot_id|>", "")
+  cleaned = cleaned:gsub("<|channel|>", "")
+  cleaned = cleaned:gsub("<|channel>", "")
+  cleaned = cleaned:gsub("<channel|>", "")
+  cleaned = cleaned:gsub("^%s+", ""):gsub("%s+$", "")
+
+  if had_reserved then
+    for _, pattern in ipairs({ "It%s+", "Here%s+", "To%s+", "The%s+", "This%s+", "For%s+", "If%s+", "You%s+", "I%s+" }) do
+      local start_at = cleaned:find(pattern)
+      if start_at then return cleaned:sub(start_at):gsub("^%s+", ""):gsub("%s+$", "") end
+    end
+  end
+
+  return cleaned
+end
+
 function M._clean_api_messages(messages)
   local save_messages = {}
   for _, msg in ipairs(messages or {}) do
     if not (msg.role == "system" and (msg._is_direct_file_context or msg._is_web_search or msg._is_memory_context or msg._is_skills_context)) then
-      local clean = { role = msg.role, content = msg.content }
+      local content = msg.content
+      if msg.role == "assistant" then
+        content = clean_reasoning_artifacts(content)
+      end
+      local clean = { role = msg.role, content = content }
       if msg.tool_calls then
         local clean_tcs = {}
         for _, tc in ipairs(msg.tool_calls) do

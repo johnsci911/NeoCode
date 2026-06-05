@@ -508,6 +508,21 @@ describe("session", function()
 
     assert.same({ { role = "user", content = "hello" } }, messages)
   end)
+
+  it("strips corrupted local reasoning artifacts from saved assistant messages", function()
+    local messages = session._clean_api_messages({
+      { role = "user", content = "hello" },
+      {
+        role = "assistant",
+        content = "<|channel>thought\n<channel|>�\nthought-thought-thought-thought-thought-thought-thought-thought\nHere is the saved answer.",
+      },
+    })
+
+    assert.same({
+      { role = "user", content = "hello" },
+      { role = "assistant", content = "Here is the saved answer." },
+    }, messages)
+  end)
 end)
 
 describe("session persistence", function()

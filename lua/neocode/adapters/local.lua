@@ -44,18 +44,99 @@ local function strip_leaked_preamble(text)
   return text
 end
 
-local function strip_thinking(text)
-  if type(text) ~= "string" or text == "" then return "" end
-  local cleaned = text:gsub("\r\n", "\n")
-  cleaned = cleaned:gsub("<[Tt][Hh][Ii][Nn][Kk]>.-</[Tt][Hh][Ii][Nn][Kk]>", "")
-  cleaned = cleaned:gsub("<analysis>.-</analysis>", "")
-  cleaned = cleaned:gsub("<reasoning>.-</reasoning>", "")
+local function strip_reserved_tokens(text)
+  local cleaned = text
   cleaned = cleaned:gsub("<｜begin▁of▁sentence｜>", "")
   cleaned = cleaned:gsub("<|start_header_id|>assistant<|end_header_id|>", "")
+  cleaned = cleaned:gsub("<|start_header_id|>user<|end_header_id|>", "")
+  cleaned = cleaned:gsub("<|start_header_id|>system<|end_header_id|>", "")
   cleaned = cleaned:gsub("<|eot_id|>", "")
+  cleaned = cleaned:gsub("<|channel|>", "")
+  cleaned = cleaned:gsub("<|channel>", "")
+  cleaned = cleaned:gsub("<channel|>", "")
+  cleaned = cleaned:gsub("<|message|>", "")
+  return cleaned
+end
+
+local function has_reserved_reasoning_artifact(text)
+  return text:find("<|channel>thought", 1, true)
+    or text:find("<|channel|>thought", 1, true)
+    or text:find("<channel|>", 1, true)
+    or text:find("<|start_header_id|>", 1, true)
+end
+
+local function looks_like_pathological_reasoning(text)
+  local thought_count = 0
+  for _ in text:gmatch("thought") do
+    thought_count = thought_count + 1
+    if thought_count >= 8 then return true end
+  end
+  return text:match("[%w%-]+%-[%w%-]+%-[%w%-]+%-[%w%-]+%-[%w%-]+%-[%w%-]+") ~= nil
+end
+
+local function first_final_sentence(text)
+  local starts = { "It%s+", "Here%s+", "To%s+", "The%s+", "This%s+", "For%s+", "If%s+", "You%s+", "I%s+" }
+  for _, pattern in ipairs(starts) do
+    local start_at = text:find(pattern)
+    if start_at then return text:sub(start_at) end
+  end
+  return nil
+end
+
+local function sanitize_text(text)
+  if type(text) ~= "string" or text == "" then return "" end
+  local cleaned = text:gsub("\r\n", "\n")
+  local had_artifact = has_reserved_reasoning_artifact(cleaned)
+  cleaned = cleaned:gsub("<[Tt][Hh][Ii][Nn][Kk]>.-</[Tt][Hh][Ii][Nn][Kk]>", "")
+  cleaned = cleaned:gsub("<[Tt][Hh][Ii][Nn][Kk]>.*$", "")
+  cleaned = cleaned:gsub("<analysis>.-</analysis>", "")
+  cleaned = cleaned:gsub("<analysis>.*$", "")
+  cleaned = cleaned:gsub("<reasoning>.-</reasoning>", "")
+  cleaned = cleaned:gsub("<reasoning>.*$", "")
+  cleaned = strip_reserved_tokens(cleaned)
   cleaned = trim_response(cleaned)
+  if had_artifact or looks_like_pathological_reasoning(cleaned) then
+    cleaned = first_final_sentence(cleaned) or ""
+  end
   cleaned = strip_leaked_preamble(cleaned)
   return trim_response(cleaned)
+end
+
+local function sanitize_content(content)
+  if type(content) == "string" then
+    return sanitize_text(content)
+  end
+  if type(content) ~= "table" then return content end
+
+  local clean_parts = {}
+  for _, part in ipairs(content) do
+    local clean_part = vim.deepcopy(part)
+    if type(clean_part) == "table" and clean_part.type == "text" then
+      clean_part.text = sanitize_text(clean_part.text or "")
+    end
+    table.insert(clean_parts, clean_part)
+  end
+  return clean_parts
+end
+
+local function sanitize_message(msg)
+  if type(msg) ~= "table" then return nil end
+  local clean = vim.deepcopy(msg)
+  clean.reasoning_content = nil
+  clean.content = sanitize_content(clean.content)
+  if clean.role == "assistant" and (clean.content == nil or clean.content == "") and not clean.tool_calls then
+    return nil
+  end
+  return clean
+end
+
+local function sanitize_messages(messages)
+  local clean = {}
+  for _, msg in ipairs(messages or {}) do
+    local sanitized = sanitize_message(msg)
+    if sanitized then table.insert(clean, sanitized) end
+  end
+  return clean
 end
 
 function M.setup(opts)
@@ -113,7 +194,7 @@ local function response_text_from_result(result)
   end
   local choice = result.choices and result.choices[1]
   local message = choice and choice.message or {}
-  return strip_thinking(message.content or result.content or "")
+  return sanitize_text(message.content or result.content or "")
 end
 
 local function message_from_result(result)
@@ -147,7 +228,7 @@ local function request_payload(messages, extra)
   extra = extra or {}
   local payload = {
     model = M.model,
-    messages = messages,
+    messages = sanitize_messages(messages),
     stream = false,
     temperature = M.config.temperature,
     max_tokens = M.config.max_tokens,
@@ -273,7 +354,7 @@ function M.stream_with_tools(messages, _, on_complete, opts)
             if next_tool_calls and #next_tool_calls > 0 and round_num < max_rounds then
               table.insert(working_messages, {
                 role = "assistant",
-                content = next_message and next_message.content or nil,
+                content = next_message and sanitize_content(next_message.content) or nil,
                 tool_calls = next_tool_calls,
               })
               continue_after_tools(next_tool_calls, round_num + 1)
@@ -298,7 +379,7 @@ function M.stream_with_tools(messages, _, on_complete, opts)
     if tool_calls and #tool_calls > 0 then
       table.insert(working_messages, {
         role = "assistant",
-        content = message and message.content or nil,
+        content = message and sanitize_content(message.content) or nil,
         tool_calls = tool_calls,
       })
       continue_after_tools(tool_calls, 1)
@@ -310,5 +391,7 @@ function M.stream_with_tools(messages, _, on_complete, opts)
 end
 
 M._request_payload = request_payload
+M._sanitize_text = sanitize_text
+M._sanitize_messages = sanitize_messages
 
 return M
