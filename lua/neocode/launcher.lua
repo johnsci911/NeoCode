@@ -8,7 +8,20 @@ local LABEL_MAP = {
   ["local"] = "  NeoCode Local",
 }
 
+local function ensure_builtin_adapters(config)
+  config.adapters = config.adapters or {}
+  if not config.adapters["local"] then
+    local ok, local_adapter = pcall(require, "neocode.adapters.local")
+    if ok then
+      config.adapters["local"] = local_adapter
+    end
+  end
+end
+
 function M._entries(config)
+  config = config or {}
+  ensure_builtin_adapters(config)
+
   local adapter_order = {}
   for name in pairs(config.adapters or {}) do
     table.insert(adapter_order, name)

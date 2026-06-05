@@ -13,6 +13,7 @@ local SEPARATORS = {
   You = "━━━━━━ You ━━━━━━",
   Assistant = "━━━ Assistant ━━━",
 }
+local CLOSING_SEPARATOR = "━━━━━━━━━━━━━━━━━━"
 
 local function separator(label)
   return SEPARATORS[label] or ("━━━ " .. label .. " ━━━")
@@ -69,7 +70,7 @@ local function append_block(lines, blocks, label, body)
     table.insert(lines, raw_line or "")
   end
   local content_end = #lines
-  table.insert(lines, separator(label))
+  table.insert(lines, CLOSING_SEPARATOR)
   table.insert(blocks, {
     label = label,
     top = top_line,

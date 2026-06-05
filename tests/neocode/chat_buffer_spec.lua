@@ -50,13 +50,13 @@ describe("chat_buffer", function()
     assert.is_falsy(text:find("│", 1, true))
   end)
 
-  it("uses fixed-width fancy separators that do not depend on window size", function()
+  it("uses role labels only on opening separators", function()
     local lines = chat_buffer.render_lines({
       { role = "assistant", content = "Hello!" },
     }, { width = 120 })
 
     assert.equals("━━━ Assistant ━━━", lines[1])
-    assert.equals(lines[1], lines[#lines])
+    assert.equals("━━━━━━━━━━━━━━━━━━", lines[#lines])
   end)
 
   it("reports content ranges for message separators", function()

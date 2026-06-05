@@ -33,4 +33,20 @@ describe("launcher", function()
 
     assert.equals("  NeoCode Local", labels["local"])
   end)
+
+  it("self-heals stale launcher configs that do not include NeoCode Local", function()
+    local stale_config = {
+      adapters = {
+        claude = require("neocode.adapters.claude"),
+      },
+    }
+
+    local labels = {}
+    for _, entry in ipairs(launcher._entries(stale_config)) do
+      labels[entry.name] = entry.display
+    end
+
+    assert.equals("  NeoCode Local", labels["local"])
+    assert.is_table(stale_config.adapters["local"])
+  end)
 end)
