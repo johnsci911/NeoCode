@@ -169,6 +169,22 @@ describe("local adapter", function()
     assert.equals("Here is the final response.", text)
   end)
 
+  it("normalizes model-escaped markdown fences in responses", function()
+    local_adapter.setup({ provider = "llama_server", model = "local-model" })
+
+    local text = local_adapter._complete_from_result({
+      choices = {
+        {
+          message = {
+            content = "Tip:\n\\```python\nprint('hello')\n\\```",
+          },
+        },
+      },
+    })
+
+    assert.equals("Tip:\n```python\nprint('hello')\n```", text)
+  end)
+
   it("surfaces API errors instead of returning blank completions", function()
     local text, stats = local_adapter._complete_from_result({
       error = { message = "model not found" },

@@ -580,6 +580,16 @@ function M._store_for_record(config, record)
   })
 end
 
+local function normalize_escaped_markdown_fences(content)
+  if type(content) ~= "string" or content == "" then return content end
+  local lines = {}
+  for line in (content .. "\n"):gmatch("([^\n]*)\n") do
+    local normalized = line:gsub("^(%s*)\\```", "%1```")
+    table.insert(lines, normalized)
+  end
+  return table.concat(lines, "\n")
+end
+
 local function clean_reasoning_artifacts(content)
   if type(content) ~= "string" or content == "" then return content end
   local cleaned = content:gsub("\r\n", "\n")
@@ -605,11 +615,11 @@ local function clean_reasoning_artifacts(content)
   if had_reserved then
     for _, pattern in ipairs({ "It%s+", "Here%s+", "To%s+", "The%s+", "This%s+", "For%s+", "If%s+", "You%s+", "I%s+" }) do
       local start_at = cleaned:find(pattern)
-      if start_at then return cleaned:sub(start_at):gsub("^%s+", ""):gsub("%s+$", "") end
+      if start_at then return normalize_escaped_markdown_fences(cleaned:sub(start_at):gsub("^%s+", ""):gsub("%s+$", "")) end
     end
   end
 
-  return cleaned
+  return normalize_escaped_markdown_fences(cleaned)
 end
 
 function M._clean_api_messages(messages)

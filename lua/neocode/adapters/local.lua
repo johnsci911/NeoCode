@@ -83,6 +83,15 @@ local function first_final_sentence(text)
   return nil
 end
 
+local function normalize_escaped_markdown_fences(text)
+  local lines = {}
+  for line in (text .. "\n"):gmatch("([^\n]*)\n") do
+    local normalized = line:gsub("^(%s*)\\```", "%1```")
+    table.insert(lines, normalized)
+  end
+  return table.concat(lines, "\n")
+end
+
 local function sanitize_text(text)
   if type(text) ~= "string" or text == "" then return "" end
   local cleaned = text:gsub("\r\n", "\n")
@@ -99,6 +108,7 @@ local function sanitize_text(text)
     cleaned = first_final_sentence(cleaned) or ""
   end
   cleaned = strip_leaked_preamble(cleaned)
+  cleaned = normalize_escaped_markdown_fences(cleaned)
   return trim_response(cleaned)
 end
 

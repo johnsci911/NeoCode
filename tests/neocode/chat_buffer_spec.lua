@@ -36,6 +36,22 @@ describe("chat_buffer", function()
     assert.is_falsy(text:find("│ local M = {}", 1, true))
   end)
 
+  it("renders model-escaped fence lines as markdown code fences", function()
+    local lines = chat_buffer.render_lines({
+      { role = "assistant", content = table.concat({
+        "Tip:",
+        "\\```python",
+        "print('hello')",
+        "\\```",
+      }, "\n") },
+    })
+
+    local text = table.concat(lines, "\n")
+    assert.is_truthy(text:find("```python", 1, true))
+    assert.is_truthy(text:find("\nprint('hello')\n", 1, true))
+    assert.is_falsy(text:find("\\```python", 1, true))
+  end)
+
   it("uses simple horizontal separators without box corners or side borders", function()
     local lines = chat_buffer.render_lines({
       { role = "assistant", content = "Hello!\n\nHow can I help?" },

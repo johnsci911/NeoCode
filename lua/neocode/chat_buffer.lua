@@ -19,6 +19,12 @@ local function separator(label)
   return SEPARATORS[label] or ("━━━ " .. label .. " ━━━")
 end
 
+local function normalize_escaped_markdown_fence_line(line)
+  if type(line) ~= "string" then return line end
+  local normalized = line:gsub("^(%s*)\\```", "%1```")
+  return normalized
+end
+
 -- Detect unified-diff content in a tool result preview and strip the verbose
 -- header lines (Index:/===/---/+++) so we render just the hunks. Some edit
 -- tools return diffs, and we want them shown inline
@@ -125,13 +131,13 @@ function M.render_lines(messages, opts)
       content = content:gsub("</think>", "\n\n")
       for line in (content .. "\n"):gmatch("([^\n]*)\n") do
         -- Indent lines between thinking markers as blockquotes
-        table.insert(body, line)
+        table.insert(body, normalize_escaped_markdown_fence_line(line))
       end
     elseif type(msg.content) == "table" then
       for _, part in ipairs(msg.content) do
         if part.type == "text" then
           for line in (part.text .. "\n"):gmatch("([^\n]*)\n") do
-            table.insert(body, line)
+            table.insert(body, normalize_escaped_markdown_fence_line(line))
           end
         elseif part.type == "image_url" then
           table.insert(body, "*[image]*")

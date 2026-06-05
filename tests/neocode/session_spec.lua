@@ -523,6 +523,16 @@ describe("session", function()
       { role = "assistant", content = "Here is the saved answer." },
     }, messages)
   end)
+
+  it("normalizes escaped markdown fences in saved assistant messages", function()
+    local messages = session._clean_api_messages({
+      { role = "assistant", content = "Example:\n\\```lua\nprint('ok')\n\\```" },
+    })
+
+    assert.same({
+      { role = "assistant", content = "Example:\n```lua\nprint('ok')\n```" },
+    }, messages)
+  end)
 end)
 
 describe("session persistence", function()
