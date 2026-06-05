@@ -9,24 +9,13 @@ local ROLE_HEADERS = {
   system = "System",
 }
 
-local DEFAULT_RULE_WIDTH = 78
+local SEPARATORS = {
+  You = "━━━━━━ You ━━━━━━",
+  Assistant = "━━━ Assistant ━━━",
+}
 
-local function rule_width(opts)
-  local width = tonumber(opts and opts.width) or DEFAULT_RULE_WIDTH
-  return math.max(20, math.floor(width))
-end
-
-local function separator(label, top, opts)
-  local width = rule_width(opts)
-  if not top then
-    return string.rep("─", width)
-  end
-
-  local title = " " .. label .. " "
-  local used = vim.fn.strdisplaywidth(title)
-  local left = string.rep("─", 2)
-  local right = string.rep("─", math.max(1, width - used - vim.fn.strdisplaywidth(left)))
-  return left .. title .. right
+local function separator(label)
+  return SEPARATORS[label] or ("━━━ " .. label .. " ━━━")
 end
 
 -- Detect unified-diff content in a tool result preview and strip the verbose
@@ -69,18 +58,18 @@ local function normalize_diff_preview(preview)
   return true, table.concat(hunks, "\n")
 end
 
-local function append_block(lines, blocks, label, body, opts)
+local function append_block(lines, blocks, label, body)
   if #body == 0 then return end
 
   if #lines > 0 then table.insert(lines, "") end
   local top_line = #lines + 1
-  table.insert(lines, separator(label, true, opts))
+  table.insert(lines, separator(label))
   local content_start = #lines + 1
   for _, raw_line in ipairs(body) do
     table.insert(lines, raw_line or "")
   end
   local content_end = #lines
-  table.insert(lines, separator(label, false, opts))
+  table.insert(lines, separator(label))
   table.insert(blocks, {
     label = label,
     top = top_line,
@@ -270,7 +259,7 @@ function M.render_lines(messages, opts)
       label = "Assistant"
     end
     if #body > 0 then
-      append_block(lines, blocks, label, body, opts)
+      append_block(lines, blocks, label, body)
     end
     ::continue::
   end
@@ -290,23 +279,9 @@ function M._apply_block_decorations(bufnr, blocks)
   end
 end
 
-local function buffer_rule_width(bufnr)
-  local width = vim.o.columns
-  local windows = vim.fn.win_findbuf(bufnr)
-  if #windows > 0 then
-    width = 0
-    for _, win in ipairs(windows) do
-      if vim.api.nvim_win_is_valid(win) then
-        width = math.max(width, vim.api.nvim_win_get_width(win))
-      end
-    end
-  end
-  return math.max(20, width - 4)
-end
-
 -- Create or update a buffer with rendered messages.
 function M.refresh(bufnr, messages)
-  local lines, blocks = M.render_lines(messages, { metadata = true, width = buffer_rule_width(bufnr) })
+  local lines, blocks = M.render_lines(messages, { metadata = true })
   vim.bo[bufnr].modifiable = true
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
   vim.bo[bufnr].modifiable = false
