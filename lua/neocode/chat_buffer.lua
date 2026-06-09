@@ -17,7 +17,6 @@ local CLOSING_SEPARATOR = "━━━━━━━━━━━━━━━━━�
 local EMPTY_PROMPT_LINES = {
   "Me:",
   "",
-  "Press `i` to write a message in the multi-line input window.",
 }
 
 local function separator(label)

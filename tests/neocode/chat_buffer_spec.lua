@@ -102,16 +102,15 @@ describe("chat_buffer", function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
 
-  it("renders empty messages with a visible local input prompt", function()
+  it("renders empty messages as an editable local input draft", function()
     local lines = chat_buffer.render_lines({})
     assert.are.same({
       "Me:",
       "",
-      "Press `i` to write a message in the multi-line input window.",
     }, lines)
   end)
 
-  it("does not treat the empty input prompt as a message block", function()
+  it("does not treat the empty input draft as a message block", function()
     local lines, blocks = chat_buffer.render_lines({}, { metadata = true })
 
     assert.equals("Me:", lines[1])
