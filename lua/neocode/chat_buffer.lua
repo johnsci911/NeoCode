@@ -17,7 +17,15 @@ local CLOSING_SEPARATOR = "━━━━━━━━━━━━━━━━━�
 local EMPTY_PROMPT_LINES = {
   "Me:",
   "",
+  "Press <C-s>, <C-CR>, or <M-CR> to send",
 }
+
+local function append_draft_prompt(lines)
+  if #lines > 0 then table.insert(lines, "") end
+  for _, line in ipairs(EMPTY_PROMPT_LINES) do
+    table.insert(lines, line)
+  end
+end
 
 local function separator(label)
   return SEPARATORS[label] or ("━━━ " .. label .. " ━━━")
@@ -277,6 +285,7 @@ function M.render_lines(messages, opts)
     end
     ::continue::
   end
+  if opts and opts.draft then append_draft_prompt(lines) end
   if opts and opts.metadata then return lines, blocks end
   return lines
 end
@@ -294,8 +303,10 @@ function M._apply_block_decorations(bufnr, blocks)
 end
 
 -- Create or update a buffer with rendered messages.
-function M.refresh(bufnr, messages)
-  local lines, blocks = M.render_lines(messages, { metadata = true })
+function M.refresh(bufnr, messages, opts)
+  opts = opts or {}
+  opts.metadata = true
+  local lines, blocks = M.render_lines(messages, opts)
   vim.bo[bufnr].modifiable = true
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
   vim.bo[bufnr].modifiable = false
@@ -305,11 +316,11 @@ function M.refresh(bufnr, messages)
 end
 
 -- Create a new chat buffer.
-function M.create(messages)
+function M.create(messages, opts)
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].buftype = "nofile"
   vim.bo[buf].swapfile = false
-  M.refresh(buf, messages or {})
+  M.refresh(buf, messages or {}, opts)
   return buf
 end
 

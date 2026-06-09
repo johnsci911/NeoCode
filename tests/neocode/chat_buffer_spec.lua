@@ -107,6 +107,7 @@ describe("chat_buffer", function()
     assert.are.same({
       "Me:",
       "",
+      "Press <C-s>, <C-CR>, or <M-CR> to send",
     }, lines)
   end)
 
@@ -115,6 +116,17 @@ describe("chat_buffer", function()
 
     assert.equals("Me:", lines[1])
     assert.are.same({}, blocks)
+  end)
+
+  it("renders a bottom draft prompt after existing messages when requested", function()
+    local lines = chat_buffer.render_lines({
+      { role = "user", content = "Hi" },
+      { role = "assistant", content = "Hello" },
+    }, { draft = true })
+
+    assert.equals("Me:", lines[#lines - 2])
+    assert.equals("", lines[#lines - 1])
+    assert.equals("Press <C-s>, <C-CR>, or <M-CR> to send", lines[#lines])
   end)
 
   it("includes image indicator for vision messages", function()
