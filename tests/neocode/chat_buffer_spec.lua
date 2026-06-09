@@ -111,6 +111,57 @@ describe("chat_buffer", function()
     }, lines)
   end)
 
+  it("renders chat context and thinking status above the draft", function()
+    local lines = chat_buffer.render_lines({}, {
+      status = {
+        context_size = 24576,
+        thinking_available = true,
+        thinking_mode = "low",
+      },
+    })
+
+    assert.are.same({
+      "Context window: 24576 · Thinking: low",
+      "",
+      "Me:",
+      "",
+      "Press <C-s>, <C-CR>, or <M-CR> to send",
+    }, lines)
+  end)
+
+  it("does not render thinking status when thinking is unavailable", function()
+    local lines = chat_buffer.render_lines({}, {
+      status = {
+        context_size = 32768,
+        thinking_available = false,
+        thinking_mode = "low",
+      },
+    })
+
+    assert.are.same({
+      "Context window: 32768",
+      "",
+      "Me:",
+      "",
+      "Press <C-s>, <C-CR>, or <M-CR> to send",
+    }, lines)
+  end)
+
+  it("omits the status line when no chat metadata is available", function()
+    local lines = chat_buffer.render_lines({}, {
+      status = {
+        thinking_available = false,
+        thinking_mode = "low",
+      },
+    })
+
+    assert.are.same({
+      "Me:",
+      "",
+      "Press <C-s>, <C-CR>, or <M-CR> to send",
+    }, lines)
+  end)
+
   it("does not treat the empty input draft as a message block", function()
     local lines, blocks = chat_buffer.render_lines({}, { metadata = true })
 

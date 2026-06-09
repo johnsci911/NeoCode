@@ -27,6 +27,19 @@ local function append_draft_prompt(lines)
   end
 end
 
+local function status_lines(status)
+  if type(status) ~= "table" then return {} end
+  local parts = {}
+  if tonumber(status.context_size) then
+    table.insert(parts, "Context window: " .. tostring(tonumber(status.context_size)))
+  end
+  if status.thinking_available == true and type(status.thinking_mode) == "string" and status.thinking_mode ~= "" then
+    table.insert(parts, "Thinking: " .. status.thinking_mode)
+  end
+  if #parts == 0 then return {} end
+  return { table.concat(parts, " · ") }
+end
+
 local function separator(label)
   return SEPARATORS[label] or ("━━━ " .. label .. " ━━━")
 end
@@ -103,11 +116,12 @@ end
 -- highlighted by Neovim/Tree-sitter/render-markdown. Side borders are drawn as
 -- virtual text in refresh().
 function M.render_lines(messages, opts)
+  local lines = status_lines(opts and opts.status)
   if #messages == 0 then
-    if opts and opts.metadata then return vim.deepcopy(EMPTY_PROMPT_LINES), {} end
-    return vim.deepcopy(EMPTY_PROMPT_LINES)
+    append_draft_prompt(lines)
+    if opts and opts.metadata then return lines, {} end
+    return lines
   end
-  local lines = {}
   local blocks = {}
   local prev_visible_role = nil
 
