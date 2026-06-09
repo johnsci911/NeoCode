@@ -30,8 +30,15 @@ end
 local function status_lines(status)
   if type(status) ~= "table" then return {} end
   local parts = {}
-  if tonumber(status.context_size) then
-    table.insert(parts, "Context window: " .. tostring(tonumber(status.context_size)))
+  local context_size = tonumber(status.context_size)
+  local context_used = tonumber(status.context_used)
+  if context_size then
+    if context_used then
+      local percent = math.floor((context_used / context_size * 100) + 0.5)
+      table.insert(parts, string.format("Context: %d / %d | %d%%", context_used, context_size, percent))
+    else
+      table.insert(parts, "Context window: " .. tostring(context_size))
+    end
   end
   if status.thinking_available == true and type(status.thinking_mode) == "string" and status.thinking_mode ~= "" then
     table.insert(parts, "Thinking: " .. status.thinking_mode)

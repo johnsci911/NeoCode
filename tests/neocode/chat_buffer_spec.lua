@@ -115,13 +115,14 @@ describe("chat_buffer", function()
     local lines = chat_buffer.render_lines({}, {
       status = {
         context_size = 24576,
+        context_used = 12288,
         thinking_available = true,
         thinking_mode = "low",
       },
     })
 
     assert.are.same({
-      "Context window: 24576 · Thinking: low",
+      "Context: 12288 / 24576 | 50% · Thinking: low",
       "",
       "Me:",
       "",
@@ -133,13 +134,14 @@ describe("chat_buffer", function()
     local lines = chat_buffer.render_lines({}, {
       status = {
         context_size = 32768,
+        context_used = 16192,
         thinking_available = false,
         thinking_mode = "low",
       },
     })
 
     assert.are.same({
-      "Context window: 32768",
+      "Context: 16192 / 32768 | 49%",
       "",
       "Me:",
       "",
