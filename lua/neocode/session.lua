@@ -1346,8 +1346,8 @@ function M._register_api_keymaps(buf, record, config)
   vim.keymap.set("n", "H", function() M.toggle(config) end, opts)
   vim.keymap.set("n", "R", function() M.rename_current(config) end, opts)
 
-  -- h opens session history picker
-  vim.keymap.set("n", "h", function()
+  -- <C-h> opens session history picker
+  vim.keymap.set("n", "<C-h>", function()
     require("neocode.history").pick(config)
   end, opts)
 
@@ -1517,7 +1517,7 @@ function M._open_api_input(record, config, opts)
   local row    = math.floor((vim.o.lines - height) / 2)
   local col    = math.floor((vim.o.columns - width) / 2)
 
-  local title = " NeoCode Input — <C-s>/<C-CR>/<M-CR> send · <C-v> paste image · <Esc> cancel "
+  local title = " NeoCode Input — <C-s>/<C-CR>/<M-CR> send · <C-p> paste image · <Esc> cancel "
   if record.pending_image_b64 then
     title = " NeoCode Input [image attached] — <C-s>/<C-CR>/<M-CR> send · <Esc> cancel "
   end
@@ -2098,7 +2098,7 @@ function M._open_api_input(record, config, opts)
   vim.keymap.set({ "i", "n" }, "<C-s>",  send_and_close, { buffer = buf, silent = true })
   vim.keymap.set({ "i", "n" }, "<C-CR>", send_and_close, { buffer = buf, silent = true })
   vim.keymap.set({ "i", "n" }, "<M-CR>", send_and_close, { buffer = buf, silent = true })
-  vim.keymap.set({ "i", "n" }, "<C-v>",  paste_image,    { buffer = buf, silent = true })
+  vim.keymap.set({ "i", "n" }, "<C-p>",  paste_image,    { buffer = buf, silent = true })
   vim.keymap.set("n", "<Esc>", cancel, { buffer = buf, silent = true })
   if opts.auto_send then send_and_close() end
 end
@@ -2328,8 +2328,8 @@ function M._register_buf_keymaps(buf, record, config)
   -- Session picker
   vim.keymap.set("n", "<S-p>", function() M.pick(config) end, opts)
 
-  -- Image paste (<leader>p avoids shadowing normal-mode p)
-  vim.keymap.set("n", "<leader>p", function()
+  -- Image paste
+  vim.keymap.set("n", "<C-p>", function()
     local adapter = config.adapters and config.adapters[record.adapter]
     if adapter then
       require("neocode.images").paste(adapter, record, config)
@@ -2351,8 +2351,8 @@ function M._register_buf_keymaps(buf, record, config)
 
   vim.keymap.set("n", "R", function() M.rename_current(config) end, opts)
 
-  -- h opens the adapter's native session picker (e.g. claude --resume)
-  vim.keymap.set("n", "h", function()
+  -- <C-h> opens the adapter's native session picker (e.g. claude --resume)
+  vim.keymap.set("n", "<C-h>", function()
     local adapter = config.adapters and config.adapters[record.adapter]
     if not adapter or not adapter.resume_cmd then
       vim.notify("neocode: adapter does not support resume", vim.log.levels.WARN)
