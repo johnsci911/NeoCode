@@ -1,7 +1,7 @@
 local M = {}
 
 -- Open a floating input buffer for composing multi-line prompts.
--- On <C-s> or <leader><CR>: sends content to the CLI via chansend, closes window.
+-- On <C-s>, <C-CR>, or <M-CR>: sends content to the CLI via chansend, closes window.
 -- On <Esc>: cancels without sending.
 function M.open(session, config)
   if not session then
@@ -26,7 +26,7 @@ function M.open(session, config)
     height   = height,
     style    = "minimal",
     border   = "rounded",
-    title    = " NeoCode Input — <C-s>/<M-CR> send · <Esc> cancel ",
+    title    = " NeoCode Input — <C-s>/<C-CR>/<M-CR> send · <Esc> cancel ",
     title_pos = "center",
   })
 
@@ -64,9 +64,11 @@ function M.open(session, config)
     vim.api.nvim_win_close(win, true)
   end
 
-  -- Send: <C-s> in both modes (may be blocked by terminal — use <M-CR> as fallback)
+  -- Send: <C-s> in both modes (may be blocked by terminal — use <C-CR>/<M-CR> as fallback)
   vim.keymap.set("i", "<C-s>",  send_and_close, { buffer = buf, silent = true })
   vim.keymap.set("n", "<C-s>",  send_and_close, { buffer = buf, silent = true })
+  vim.keymap.set("i", "<C-CR>", send_and_close, { buffer = buf, silent = true })
+  vim.keymap.set("n", "<C-CR>", send_and_close, { buffer = buf, silent = true })
   -- Alt+Enter as reliable fallback send (not intercepted by terminal)
   vim.keymap.set("i", "<M-CR>", send_and_close, { buffer = buf, silent = true })
   vim.keymap.set("n", "<M-CR>", send_and_close, { buffer = buf, silent = true })

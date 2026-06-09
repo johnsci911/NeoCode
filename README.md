@@ -305,7 +305,7 @@ Memory and selected skills are injected as system context for NeoCode-managed AP
 
 | Keymap | Action |
 |--------|--------|
-| `i` | Open multi-line input window |
+| `i` | Insert in NeoCode Local's inline draft, or open the multi-line input window when inline editing is unavailable |
 | `h` | Session history picker (resume/delete/rename) |
 | `R` | Rename current session |
 | `<leader>p` | Paste image from clipboard |
@@ -323,6 +323,7 @@ Memory and selected skills are injected as system context for NeoCode-managed AP
 | Keymap | Action |
 |--------|--------|
 | `<C-s>` | Send and close |
+| `<C-CR>` | Send and close (Ctrl+Enter, when supported by your terminal) |
 | `<M-CR>` | Send and close (Alt+Enter) |
 | `<Esc>` | Cancel without sending |
 
