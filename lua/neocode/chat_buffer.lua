@@ -14,6 +14,11 @@ local SEPARATORS = {
   Assistant = "━━━ Assistant ━━━",
 }
 local CLOSING_SEPARATOR = "━━━━━━━━━━━━━━━━━━"
+local EMPTY_PROMPT_LINES = {
+  "Me:",
+  "",
+  "Press `i` to write a message in the multi-line input window.",
+}
 
 local function separator(label)
   return SEPARATORS[label] or ("━━━ " .. label .. " ━━━")
@@ -91,7 +96,10 @@ end
 -- highlighted by Neovim/Tree-sitter/render-markdown. Side borders are drawn as
 -- virtual text in refresh().
 function M.render_lines(messages, opts)
-  if #messages == 0 then return {} end
+  if #messages == 0 then
+    if opts and opts.metadata then return vim.deepcopy(EMPTY_PROMPT_LINES), {} end
+    return vim.deepcopy(EMPTY_PROMPT_LINES)
+  end
   local lines = {}
   local blocks = {}
   local prev_visible_role = nil
