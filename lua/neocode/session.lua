@@ -300,6 +300,13 @@ end
 function M._api_input_text_from_lines(lines)
   lines = vim.deepcopy(lines or {})
   if lines[1] == "Me:" then table.remove(lines, 1) end
+  local send_hints = {
+    ["Press <C-s> or <M-CR> to send"] = true,
+    ["Press <C-s>, <C-CR>, or <M-CR> to send"] = true,
+  }
+  for i = #lines, 1, -1 do
+    if send_hints[lines[i]] then table.remove(lines, i) end
+  end
   local text = table.concat(lines, "\n")
   return text:gsub("^\n+", ""):gsub("%s+$", "")
 end
@@ -310,6 +317,35 @@ function M._api_input_lines_from_text(text)
     table.insert(lines, line)
   end
   return lines
+end
+
+function M._api_inline_draft_text_from_lines(lines)
+  local start = nil
+  for i = #(lines or {}), 1, -1 do
+    if lines[i] == "Me:" then
+      start = i
+      break
+    end
+  end
+  if not start then return "" end
+  local draft = {}
+  for i = start, #(lines or {}) do
+    table.insert(draft, lines[i])
+  end
+  return M._api_input_text_from_lines(draft)
+end
+
+function M._refresh_api_chat(record, opts)
+  local chat_buffer = require("neocode.chat_buffer")
+  opts = opts or {}
+  if not record or not record.bufnr or not vim.api.nvim_buf_is_valid(record.bufnr) then return end
+  chat_buffer.refresh(record.bufnr, record.messages or {}, { draft = opts.draft == true })
+  vim.bo[record.bufnr].modifiable = opts.editable == true
+  if opts.editable then
+    local total = vim.api.nvim_buf_line_count(record.bufnr)
+    local target = math.max(1, total - 1)
+    pcall(vim.api.nvim_win_set_cursor, record.winid or 0, { target, 0 })
+  end
 end
 
 local function strip_path_token(path)
@@ -1028,7 +1064,7 @@ function M.create_api(adapter, title, config)
     record.tool_permissions = state.tool_permissions
   end
 
-  local buf = chat_buffer.create(record.messages)
+  local buf = chat_buffer.create(record.messages, { draft = true })
   record.bufnr = buf
 
   vim.cmd("vsplit")
@@ -1042,11 +1078,8 @@ function M.create_api(adapter, title, config)
   vim.wo[win].concealcursor = "nc"
   vim.wo[win].winbar = config.winbar or ""
   vim.wo[win].list = false
-  if #record.messages == 0 then
-    vim.bo[buf].modifiable = true
-    vim.api.nvim_win_set_cursor(win, { 2, 0 })
-    vim.cmd("startinsert")
-  end
+  M._refresh_api_chat(record, { draft = true, editable = true })
+  vim.cmd("startinsert")
 
   M._register_api_keymaps(buf, record, config)
   -- Don't persist yet -- wait until first message is sent (see do_stream auto-title)
@@ -1120,7 +1153,7 @@ function M.resume_api(adapter, session_data, config)
     record.tool_permissions = state.tool_permissions
   end
 
-  local buf = chat_buffer.create(record.messages)
+  local buf = chat_buffer.create(record.messages, { draft = true })
   record.bufnr = buf
 
   -- Reuse existing NeoCode window if possible, otherwise vsplit
@@ -1149,9 +1182,7 @@ function M.resume_api(adapter, session_data, config)
   vim.wo[win].concealcursor = "nc"
   vim.wo[win].winbar = config.winbar or ""
   vim.wo[win].list = false
-  if #record.messages == 0 then
-    vim.bo[buf].modifiable = true
-  end
+  M._refresh_api_chat(record, { draft = true, editable = true })
 
   -- Update status and persist
   record.status = "active"
@@ -1178,7 +1209,7 @@ function M._register_api_keymaps(buf, record, config)
   local opts = { buffer = buf, silent = true }
 
   vim.keymap.set("n", "i", function()
-    if record.messages and #record.messages == 0 then
+    if vim.bo[buf].modifiable then
       vim.cmd("startinsert")
       return
     end
@@ -1186,18 +1217,15 @@ function M._register_api_keymaps(buf, record, config)
   end, opts)
 
   local function send_inline_draft()
-    if not record.messages or #record.messages > 0 then
-      M._open_api_input(record, config)
-      return
-    end
     local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-    local text = M._api_input_text_from_lines(lines)
+    local text = M._api_inline_draft_text_from_lines(lines)
     if text == "" then return end
     vim.bo[buf].modifiable = false
     M._open_api_input(record, config, { initial_lines = M._api_input_lines_from_text(text), auto_send = true })
   end
 
   vim.keymap.set({ "i", "n" }, "<C-s>", send_inline_draft, opts)
+  vim.keymap.set({ "i", "n" }, "<C-CR>", send_inline_draft, opts)
   vim.keymap.set({ "i", "n" }, "<M-CR>", send_inline_draft, opts)
 
   vim.keymap.set("n", "<C-v>", function()
@@ -1314,7 +1342,7 @@ function M._compact_session(record, config)
           record._auto_compact_running = false
           vim.notify("neocode: compact failed — no response from model (is it running?)", vim.log.levels.WARN)
           if record.bufnr and vim.api.nvim_buf_is_valid(record.bufnr) then
-            chat_buffer.refresh(record.bufnr, record.messages)
+            M._refresh_api_chat(record, { draft = true, editable = true })
           end
           return
         end
@@ -1331,7 +1359,7 @@ function M._compact_session(record, config)
           record._auto_compact_running = false
           vim.notify("neocode: compact failed — " .. tostring(result.error.message or result.error), vim.log.levels.WARN)
           if record.bufnr and vim.api.nvim_buf_is_valid(record.bufnr) then
-            chat_buffer.refresh(record.bufnr, record.messages)
+            M._refresh_api_chat(record, { draft = true, editable = true })
           end
           return
         end
@@ -1341,7 +1369,7 @@ function M._compact_session(record, config)
           vim.notify("neocode: compact failed — model returned empty summary (try again)", vim.log.levels.WARN)
           -- Remove compacting indicator
           if record.bufnr and vim.api.nvim_buf_is_valid(record.bufnr) then
-            chat_buffer.refresh(record.bufnr, record.messages)
+            M._refresh_api_chat(record, { draft = true, editable = true })
           end
           return
         end
@@ -1364,18 +1392,6 @@ function M._compact_session(record, config)
           old_message_count = old_count,
         })
 
-        -- Refresh display
-        chat_buffer.refresh(record.bufnr, record.messages)
-        vim.bo[record.bufnr].modifiable = true
-        local total = vim.api.nvim_buf_line_count(record.bufnr)
-        vim.api.nvim_buf_set_lines(record.bufnr, total, total, false, {
-          "",
-          "🗜️ Conversation compacted (" .. old_count .. " messages → summary)",
-          "",
-          "---",
-        })
-        vim.bo[record.bufnr].modifiable = false
-
         -- Save compacted prompt-ready history without deleting the raw transcript.
         M._save_api_messages(config, record, record.messages)
 
@@ -1383,6 +1399,7 @@ function M._compact_session(record, config)
         record._auto_compact_running = false
 
         vim.notify("neocode: conversation compacted", vim.log.levels.INFO)
+        M._refresh_api_chat(record, { draft = true, editable = true })
       end)
     end,
   })
@@ -1408,9 +1425,9 @@ function M._open_api_input(record, config, opts)
   local row    = math.floor((vim.o.lines - height) / 2)
   local col    = math.floor((vim.o.columns - width) / 2)
 
-  local title = " NeoCode Input — <C-s> send · <C-v> paste image · <Esc> cancel "
+  local title = " NeoCode Input — <C-s>/<C-CR>/<M-CR> send · <C-v> paste image · <Esc> cancel "
   if record.pending_image_b64 then
-    title = " NeoCode Input [image attached] — <C-s> send · <Esc> cancel "
+    title = " NeoCode Input [image attached] — <C-s>/<C-CR>/<M-CR> send · <Esc> cancel "
   end
 
   local win = vim.api.nvim_open_win(buf, true, {
@@ -1454,7 +1471,7 @@ function M._open_api_input(record, config, opts)
         if record.messages and #record.messages > 0 then
           M._save_api_messages(config, record, record.messages)
         end
-        chat_buffer.refresh(record.bufnr, record.messages)
+        M._refresh_api_chat(record, { draft = true, editable = true })
         vim.notify("neocode: renamed session to '" .. record.title .. "'", vim.log.levels.INFO)
       end
       return
@@ -1733,7 +1750,8 @@ function M._open_api_input(record, config, opts)
 
         M._strip_image_payloads_from_messages(record.messages)
 
-        chat_buffer.refresh(record.bufnr, record.messages)
+        M._refresh_api_chat(record, { draft = true, editable = true })
+        vim.cmd("startinsert")
 
         M._save_api_messages(config, record, record.messages)
 
@@ -1971,7 +1989,7 @@ function M._open_api_input(record, config, opts)
     images.delete_temp(path)
     -- Update title to show image attached
     vim.api.nvim_win_set_config(win, {
-      title = " NeoCode Input [image attached] — <C-s> send · <Esc> cancel ",
+      title = " NeoCode Input [image attached] — <C-s>/<C-CR>/<M-CR> send · <Esc> cancel ",
       title_pos = "center",
     })
     vim.notify("neocode: image attached", vim.log.levels.INFO)
@@ -1982,6 +2000,7 @@ function M._open_api_input(record, config, opts)
   end
 
   vim.keymap.set({ "i", "n" }, "<C-s>",  send_and_close, { buffer = buf, silent = true })
+  vim.keymap.set({ "i", "n" }, "<C-CR>", send_and_close, { buffer = buf, silent = true })
   vim.keymap.set({ "i", "n" }, "<M-CR>", send_and_close, { buffer = buf, silent = true })
   vim.keymap.set({ "i", "n" }, "<C-v>",  paste_image,    { buffer = buf, silent = true })
   vim.keymap.set("n", "<Esc>", cancel, { buffer = buf, silent = true })

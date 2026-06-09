@@ -279,7 +279,8 @@ describe("session", function()
   describe("api input composer", function()
     it("strips the visible Me prompt marker before sending", function()
       assert.equals("hello", session._api_input_text_from_lines({ "Me:", "hello" }))
-      assert.equals("multi\nline", session._api_input_text_from_lines({ "Me:", "", "multi", "line", "" }))
+      assert.equals("multi\nline", session._api_input_text_from_lines({ "Me:", "", "multi", "line", "", "Press <C-s>, <C-CR>, or <M-CR> to send" }))
+      assert.equals("multi\nline", session._api_input_text_from_lines({ "Me:", "", "multi", "line", "", "Press <C-s> or <M-CR> to send" }))
     end)
 
     it("treats a prompt-only input window as empty", function()
@@ -288,6 +289,22 @@ describe("session", function()
 
     it("builds visible Me-prefixed draft lines from inline chat text", function()
       assert.are.same({ "Me:", "hello", "world" }, session._api_input_lines_from_text("hello\nworld"))
+    end)
+
+    it("extracts only the bottom inline draft from a rendered transcript", function()
+      assert.equals("next prompt", session._api_inline_draft_text_from_lines({
+        "━━━━━━ You ━━━━━━",
+        "old prompt",
+        "━━━━━━━━━━━━━━━━━━",
+        "",
+        "━━━ Assistant ━━━",
+        "old answer",
+        "━━━━━━━━━━━━━━━━━━",
+        "",
+        "Me:",
+        "next prompt",
+        "Press <C-s>, <C-CR>, or <M-CR> to send",
+      }))
     end)
   end)
 
