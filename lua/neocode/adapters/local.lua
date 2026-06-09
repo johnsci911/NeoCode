@@ -69,7 +69,14 @@ function M.set_thinking(mode)
     return false, "Thinking mode not available"
   end
   M.config.thinking = normalized
-  return true, "thinking mode: " .. normalized
+  local source = M.config.thinking_source
+  if normalized ~= "off" and type(source) == "string" and source ~= "" then
+    return true, "thinking mode: " .. normalized .. " (enabled for next request; confirmed by " .. source .. ")"
+  end
+  if normalized ~= "off" then
+    return true, "thinking mode: " .. normalized .. " (enabled for next request)"
+  end
+  return true, "thinking mode: off"
 end
 
 function M._thinking_payload(mode, model, config)
@@ -93,6 +100,9 @@ function M._thinking_payload(mode, model, config)
     enable_thinking = true,
     chat_template_kwargs = kwargs,
   }
+  if type(config.reasoning_format) == "string" and config.reasoning_format ~= "" and config.reasoning_format ~= "none" then
+    payload.reasoning_format = config.reasoning_format
+  end
   if preset.thinking_budget_tokens then payload.thinking_budget_tokens = preset.thinking_budget_tokens end
   return payload
 end
@@ -247,6 +257,12 @@ function M.setup(opts)
     if not explicit_thinking_available and type(metadata.thinking_available) == "boolean" then
       M.config.thinking_available = metadata.thinking_available
     end
+    if type(metadata.thinking_source) == "string" and metadata.thinking_source ~= "" then
+      M.config.thinking_source = metadata.thinking_source
+    end
+    if type(metadata.reasoning_format) == "string" and metadata.reasoning_format ~= "" then
+      M.config.reasoning_format = metadata.reasoning_format
+    end
   end
   M.base_url = M.provider.base_url
   M.model = M.config.model or M.provider.model
@@ -290,11 +306,16 @@ end
 
 local function stats_from_result(result)
   local usage = type(result) == "table" and result.usage or nil
+  local message = message_from_result(result) or {}
   local stats = {
     provider = M.config and M.config.provider or "openai_compatible",
     model = M.model,
     context_size = M.config and M.config.context_size,
+    thinking_mode = M.config and M.config.thinking or nil,
   }
+  if type(message.reasoning_content) == "string" and message.reasoning_content ~= "" then
+    stats.thinking_confirmed = true
+  end
   if type(result) == "table" and result.error then
     stats.error = true
   end

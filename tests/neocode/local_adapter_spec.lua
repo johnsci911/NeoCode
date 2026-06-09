@@ -86,19 +86,22 @@ describe("local adapter", function()
         return {
           model = "metadata-enabled-model",
           thinking_available = true,
+          thinking_source = "slots reasoning_format=deepseek",
+          reasoning_format = "deepseek",
         }
       end,
     })
 
     local ok, message = local_adapter.set_thinking("medium")
     assert.is_true(ok)
-    assert.equals("thinking mode: medium", message)
+    assert.equals("thinking mode: medium (enabled for next request; confirmed by slots reasoning_format=deepseek)", message)
 
     local payload = local_adapter._request_payload({
       { role = "user", content = "think" },
     })
 
     assert.is_true(payload.enable_thinking)
+    assert.equals("deepseek", payload.reasoning_format)
     assert.is_true(payload.chat_template_kwargs.enable_thinking)
     assert.equals("medium", payload.chat_template_kwargs.reasoning_effort)
     assert.equals(2048, payload.thinking_budget_tokens)
@@ -209,6 +212,21 @@ describe("local adapter", function()
     assert.equals(24576, stats.context_size)
     assert.equals(100, stats.usage.prompt_tokens)
     assert.equals(125, stats.usage.total_tokens)
+  end)
+
+  it("confirms thinking only when llama.cpp returns reasoning content", function()
+    local_adapter.setup({ provider = "llama_server", model = "local-model", thinking = "low", thinking_available = true })
+
+    local text, stats = local_adapter._complete_from_result({
+      choices = {
+        { message = { content = "done", reasoning_content = "hidden reasoning" } },
+      },
+      usage = { prompt_tokens = 10, completion_tokens = 5, total_tokens = 15 },
+    })
+
+    assert.equals("done", text)
+    assert.is_true(stats.thinking_confirmed)
+    assert.equals("low", stats.thinking_mode)
   end)
 
   it("strips leaked local thinking and chat-template preambles from responses", function()

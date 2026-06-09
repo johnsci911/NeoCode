@@ -34,6 +34,38 @@ describe("llama-server provider", function()
     assert.is_true(metadata.thinking_available)
   end)
 
+  it("detects thinking support from llama-server chat template enable_thinking", function()
+    local metadata = provider.metadata_from_responses({
+      model_alias = "template-model",
+      chat_template = "{% if enable_thinking is defined and enable_thinking %}<|think|>{% endif %}",
+    }, {
+      data = {
+        { id = "fallback-model" },
+      },
+    })
+
+    assert.is_true(metadata.thinking_available)
+    assert.equals("chat_template enable_thinking", metadata.thinking_source)
+  end)
+
+  it("detects thinking support from live llama-server slot reasoning format", function()
+    local metadata = provider.metadata_from_responses({
+      model_alias = "slot-model",
+    }, {
+      data = {
+        { id = "fallback-model" },
+      },
+    }, {
+      slots = {
+        { params = { reasoning_format = "deepseek", reasoning_in_content = false } },
+      },
+    })
+
+    assert.is_true(metadata.thinking_available)
+    assert.equals("slots reasoning_format=deepseek", metadata.thinking_source)
+    assert.equals("deepseek", metadata.reasoning_format)
+  end)
+
   it("does not infer thinking support from model names", function()
     local metadata = provider.metadata_from_responses({
       model_alias = "qwen3-thinking-looking-name",
@@ -66,7 +98,7 @@ describe("llama-server provider", function()
     assert.equals("http://127.0.0.1:8080/slots", configured:slots_url())
   end)
 
-  it("probes props and v1 models metadata by default", function()
+  it("probes props, v1 models, and slots metadata by default", function()
     local seen = {}
     local configured = provider.setup({
       base_url = "http://127.0.0.1:8080/v1",
@@ -78,14 +110,19 @@ describe("llama-server provider", function()
         if url:match("/v1/models$") then
           return { data = { { id = "models-model", meta = { n_ctx_train = 262144 } } } }
         end
+        if url:match("/slots$") then
+          return { { params = { reasoning_format = "deepseek" } } }
+        end
       end,
     })
 
     local metadata = configured:probe_metadata()
 
-    assert.same({ "http://127.0.0.1:8080/props", "http://127.0.0.1:8080/v1/models" }, seen)
+    assert.same({ "http://127.0.0.1:8080/props", "http://127.0.0.1:8080/v1/models", "http://127.0.0.1:8080/slots" }, seen)
     assert.equals("props-model", metadata.model)
     assert.equals(24576, metadata.context_size)
     assert.equals(262144, metadata.training_context_size)
+    assert.is_true(metadata.thinking_available)
+    assert.equals("deepseek", metadata.reasoning_format)
   end)
 end)

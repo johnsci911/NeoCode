@@ -36,6 +36,24 @@ local function props_thinking_available(props)
     if type(caps.supports_thinking) == "boolean" then return caps.supports_thinking end
     if type(caps.supports_enable_thinking) == "boolean" then return caps.supports_enable_thinking end
   end
+  if type(props.chat_template) == "string" and props.chat_template:find("enable_thinking", 1, true) then
+    return true, "chat_template enable_thinking"
+  end
+  return nil
+end
+
+local function slots_thinking_metadata(slots)
+  if type(slots) ~= "table" then return nil end
+  for _, slot in ipairs(slots) do
+    local params = type(slot) == "table" and slot.params or nil
+    local reasoning_format = type(params) == "table" and params.reasoning_format or nil
+    if type(reasoning_format) == "string" and reasoning_format ~= "" and reasoning_format ~= "none" then
+      return true, "slots reasoning_format=" .. reasoning_format, reasoning_format
+    end
+    if type(params) == "table" and params.reasoning_in_content == true then
+      return true, "slots reasoning_in_content", reasoning_format
+    end
+  end
   return nil
 end
 
@@ -53,9 +71,19 @@ function M.metadata_from_responses(props, models, opts)
     or tonumber(meta.n_ctx)
     or tonumber(meta.n_ctx_train)
     or base.context_size
-  local thinking_available = props_thinking_available(props)
+  local thinking_available, thinking_source = props_thinking_available(props)
+  local slot_thinking_available, slot_thinking_source, reasoning_format = slots_thinking_metadata(opts.slots)
+  if thinking_available == nil then
+    thinking_available = slot_thinking_available
+    thinking_source = slot_thinking_source
+  elseif thinking_source and slot_thinking_source and thinking_source ~= slot_thinking_source then
+    thinking_source = thinking_source .. "; " .. slot_thinking_source
+  elseif not thinking_source and slot_thinking_source then
+    thinking_source = slot_thinking_source
+  end
   if thinking_available == nil and type(base.thinking_available) == "boolean" then
     thinking_available = base.thinking_available
+    if thinking_available then thinking_source = "models reasoning capability" end
   end
 
   return {
@@ -69,6 +97,8 @@ function M.metadata_from_responses(props, models, opts)
       or tonumber(meta.n_ctx)
       or tonumber(meta.n_ctx_train)),
     thinking_available = thinking_available == true,
+    thinking_source = thinking_source,
+    reasoning_format = reasoning_format,
   }
 end
 
@@ -113,8 +143,9 @@ function Provider:probe_metadata()
   end
   local props = self.read_json and self.read_json(self:props_url()) or nil
   local models = self.read_json and self.read_json(self:models_url()) or nil
-  if not props and not models then return nil end
-  return M.metadata_from_responses(props, models, { fallback_context_size = self.fallback_context_size })
+  local slots = self.read_json and self.read_json(self:slots_url()) or nil
+  if not props and not models and not slots then return nil end
+  return M.metadata_from_responses(props, models, { fallback_context_size = self.fallback_context_size, slots = slots })
 end
 
 M._normalize_server_url = normalize_server_url
