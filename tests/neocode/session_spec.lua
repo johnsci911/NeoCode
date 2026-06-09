@@ -403,7 +403,9 @@ describe("session", function()
       local buf = vim.api.nvim_create_buf(false, true)
       local record = {
         bufnr = buf,
-        messages = {},
+        messages = {
+          { role = "assistant", content = "done", _stats = { usage = { prompt_tokens = 12000, completion_tokens = 288 } } },
+        },
         api_adapter = {
           config = { context_size = 24576, thinking = "medium" },
           thinking_available = function() return true end,
@@ -415,8 +417,28 @@ describe("session", function()
 
       local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
       vim.api.nvim_buf_delete(buf, { force = true })
-      assert.equals("Context window: 24576 · Thinking: medium", lines[1])
-      assert.equals("Me:", lines[3])
+      assert.equals("Context: 12288 / 24576 | 50% · Thinking: medium", lines[1])
+      assert.is_truthy(vim.tbl_contains(lines, "Me:"))
+    end)
+
+    it("does not update context usage before a completed assistant response", function()
+      local buf = vim.api.nvim_create_buf(false, true)
+      local record = {
+        bufnr = buf,
+        messages = {
+          { role = "assistant", content = "", _stats = { usage = { prompt_tokens = 12000, completion_tokens = 288 } } },
+        },
+        api_adapter = {
+          config = { context_size = 24576 },
+          thinking_available = function() return false end,
+        },
+      }
+
+      session._refresh_api_chat(record, { draft = true, editable = true })
+
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      vim.api.nvim_buf_delete(buf, { force = true })
+      assert.equals("Context window: 24576", lines[1])
     end)
 
     it("hides thinking mode when the adapter does not support thinking", function()

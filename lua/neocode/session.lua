@@ -411,6 +411,16 @@ function M._api_inline_draft_text_from_lines(lines)
   return M._api_input_text_from_lines(draft)
 end
 
+local function latest_completed_assistant_stats(messages)
+  for i = #(messages or {}), 1, -1 do
+    local msg = messages[i]
+    if msg and msg.role == "assistant" and msg.content ~= nil and msg.content ~= "" and type(msg._stats) == "table" then
+      return msg._stats
+    end
+  end
+  return nil
+end
+
 function M._refresh_api_chat(record, opts)
   local chat_buffer = require("neocode.chat_buffer")
   opts = opts or {}
@@ -431,10 +441,12 @@ function M._refresh_api_chat(record, opts)
   elseif thinking_available then
     thinking_mode = adapter_config.thinking or "off"
   end
+  local last_stats = latest_completed_assistant_stats(record.messages)
   chat_buffer.refresh(record.bufnr, record.messages or {}, {
     draft = opts.draft == true,
     status = {
       context_size = adapter_config.context_size or adapter_config.context_length,
+      context_used = M._auto_compact_used_tokens(last_stats),
       thinking_available = thinking_available,
       thinking_mode = thinking_mode,
     },
