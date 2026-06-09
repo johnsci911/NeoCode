@@ -1,5 +1,60 @@
 local M = {}
 
+function M._build_entries(config)
+  local session = require("neocode.session")
+  local all = session.load_all_from_disk(config)
+  local active_map = {}
+  for _, s in ipairs(session._all()) do
+    local is_api_session = s.messages ~= nil or s.api_adapter ~= nil
+    if is_api_session and (not s.messages or #s.messages == 0) then goto skip_mem end
+    active_map[s.id] = s
+    ::skip_mem::
+  end
+
+  local entries = {}
+  local seen = {}
+
+  -- Add disk sessions (with in-memory overrides for active ones)
+  for _, s in ipairs(all) do
+    seen[s.id] = true
+    local mem = active_map[s.id]
+    local is_active = mem ~= nil
+    local title = (mem and mem.title) or s.title
+    local timestamp = s.created_at and os.date("%m/%d/%Y %H:%M", s.created_at) or ""
+
+    table.insert(entries, {
+      id         = s.id,
+      adapter    = s.adapter,
+      title      = title,
+      status     = is_active and "active" or "closed",
+      created_at = s.created_at,
+      display    = string.format("%s %s  [%s]  %s",
+        is_active and "●" or "○", title, s.adapter, timestamp),
+    })
+  end
+
+  -- Add in-memory sessions not on disk.
+  for id, s in pairs(active_map) do
+    if not seen[id] then
+      local timestamp = s.created_at and os.date("%m/%d/%Y %H:%M", s.created_at) or ""
+      table.insert(entries, {
+        id         = s.id,
+        adapter    = s.adapter,
+        title      = s.title,
+        status     = "active",
+        created_at = s.created_at,
+        display    = string.format("● %s  [%s]  %s", s.title, s.adapter, timestamp),
+      })
+    end
+  end
+
+  table.sort(entries, function(a, b)
+    if a.status ~= b.status then return a.status == "active" end
+    return (a.created_at or 0) > (b.created_at or 0)
+  end)
+  return entries
+end
+
 -- Open Telescope picker showing all sessions (active + closed).
 -- Actions: <CR> resume/switch, d delete, r rename, n new session
 function M.pick(config)
@@ -20,61 +75,7 @@ function M.pick(config)
     vim.schedule(function() M.pick(config) end)
   end
 
-  local function build_entries()
-    local all = session.load_all_from_disk(config)
-    local active_map = {}
-    for _, s in ipairs(session._all()) do
-      -- Skip empty sessions (no messages sent yet)
-      if not s.messages or #s.messages == 0 then goto skip_mem end
-      active_map[s.id] = s
-      ::skip_mem::
-    end
-
-    local entries = {}
-    local seen = {}
-
-    -- Add disk sessions (with in-memory overrides for active ones)
-    for _, s in ipairs(all) do
-      seen[s.id] = true
-      local mem = active_map[s.id]
-      local is_active = mem ~= nil
-      local title = (mem and mem.title) or s.title
-      local timestamp = s.created_at and os.date("%m/%d/%Y %H:%M", s.created_at) or ""
-
-      table.insert(entries, {
-        id         = s.id,
-        adapter    = s.adapter,
-        title      = title,
-        status     = is_active and "active" or "closed",
-        created_at = s.created_at,
-        display    = string.format("%s %s  [%s]  %s",
-          is_active and "●" or "○", title, s.adapter, timestamp),
-      })
-    end
-
-    -- Add in-memory sessions not on disk (only if they have messages)
-    for id, s in pairs(active_map) do
-      if not seen[id] then
-        local timestamp = s.created_at and os.date("%m/%d/%Y %H:%M", s.created_at) or ""
-        table.insert(entries, {
-          id         = s.id,
-          adapter    = s.adapter,
-          title      = s.title,
-          status     = "active",
-          created_at = s.created_at,
-          display    = string.format("● %s  [%s]  %s", s.title, s.adapter, timestamp),
-        })
-      end
-    end
-
-    table.sort(entries, function(a, b)
-      if a.status ~= b.status then return a.status == "active" end
-      return (a.created_at or 0) > (b.created_at or 0)
-    end)
-    return entries
-  end
-
-  local entries = build_entries()
+  local entries = M._build_entries(config)
 
   pickers.new({}, {
     prompt_title = "NeoCode Sessions  (<CR> resume · d delete · r rename · n new)",
