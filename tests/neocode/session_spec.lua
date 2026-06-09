@@ -285,6 +285,10 @@ describe("session", function()
     it("treats a prompt-only input window as empty", function()
       assert.equals("", session._api_input_text_from_lines({ "Me:", "" }))
     end)
+
+    it("builds visible Me-prefixed draft lines from inline chat text", function()
+      assert.are.same({ "Me:", "hello", "world" }, session._api_input_lines_from_text("hello\nworld"))
+    end)
   end)
 
   describe("_extract_direct_read_path", function()

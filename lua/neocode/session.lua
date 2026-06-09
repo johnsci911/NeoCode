@@ -304,6 +304,14 @@ function M._api_input_text_from_lines(lines)
   return text:gsub("^\n+", ""):gsub("%s+$", "")
 end
 
+function M._api_input_lines_from_text(text)
+  local lines = { "Me:" }
+  for _, line in ipairs(vim.split(text or "", "\n", { plain = true })) do
+    table.insert(lines, line)
+  end
+  return lines
+end
+
 local function strip_path_token(path)
   return (path or "")
     :gsub("^[`'\"]+", "")
@@ -1034,6 +1042,11 @@ function M.create_api(adapter, title, config)
   vim.wo[win].concealcursor = "nc"
   vim.wo[win].winbar = config.winbar or ""
   vim.wo[win].list = false
+  if #record.messages == 0 then
+    vim.bo[buf].modifiable = true
+    vim.api.nvim_win_set_cursor(win, { 2, 0 })
+    vim.cmd("startinsert")
+  end
 
   M._register_api_keymaps(buf, record, config)
   -- Don't persist yet -- wait until first message is sent (see do_stream auto-title)
@@ -1136,6 +1149,9 @@ function M.resume_api(adapter, session_data, config)
   vim.wo[win].concealcursor = "nc"
   vim.wo[win].winbar = config.winbar or ""
   vim.wo[win].list = false
+  if #record.messages == 0 then
+    vim.bo[buf].modifiable = true
+  end
 
   -- Update status and persist
   record.status = "active"
@@ -1162,8 +1178,27 @@ function M._register_api_keymaps(buf, record, config)
   local opts = { buffer = buf, silent = true }
 
   vim.keymap.set("n", "i", function()
+    if record.messages and #record.messages == 0 then
+      vim.cmd("startinsert")
+      return
+    end
     M._open_api_input(record, config)
   end, opts)
+
+  local function send_inline_draft()
+    if not record.messages or #record.messages > 0 then
+      M._open_api_input(record, config)
+      return
+    end
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    local text = M._api_input_text_from_lines(lines)
+    if text == "" then return end
+    vim.bo[buf].modifiable = false
+    M._open_api_input(record, config, { initial_lines = M._api_input_lines_from_text(text), auto_send = true })
+  end
+
+  vim.keymap.set({ "i", "n" }, "<C-s>", send_inline_draft, opts)
+  vim.keymap.set({ "i", "n" }, "<M-CR>", send_inline_draft, opts)
 
   vim.keymap.set("n", "<C-v>", function()
     M._paste_image_api(record, config)
@@ -1359,7 +1394,8 @@ function M._compact_session(record, config)
   return true
 end
 
-function M._open_api_input(record, config)
+function M._open_api_input(record, config, opts)
+  opts = opts or {}
   local chat_buffer = require("neocode.chat_buffer")
   local llama = record.api_adapter
 
@@ -1391,8 +1427,9 @@ function M._open_api_input(record, config)
 
   vim.wo[win].wrap      = true
   vim.wo[win].linebreak = true
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "Me:", "" })
-  vim.api.nvim_win_set_cursor(win, { 2, 0 })
+  local initial_lines = opts.initial_lines or { "Me:", "" }
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, initial_lines)
+  vim.api.nvim_win_set_cursor(win, { math.max(2, #initial_lines), 0 })
   vim.cmd("startinsert")
 
   local function send_and_close()
@@ -1948,6 +1985,7 @@ function M._open_api_input(record, config)
   vim.keymap.set({ "i", "n" }, "<M-CR>", send_and_close, { buffer = buf, silent = true })
   vim.keymap.set({ "i", "n" }, "<C-v>",  paste_image,    { buffer = buf, silent = true })
   vim.keymap.set("n", "<Esc>", cancel, { buffer = buf, silent = true })
+  if opts.auto_send then send_and_close() end
 end
 
 function M._paste_image_api(record, config)
