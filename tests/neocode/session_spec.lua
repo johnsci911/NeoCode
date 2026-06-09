@@ -253,6 +253,89 @@ describe("session", function()
       assert.equals("neocode: thinking mode: medium (enabled for next request; confirmed by slots reasoning_format=deepseek)", notified[1].message)
     end)
 
+    it("clears the inline draft after handling /thinking", function()
+      local old_notify = vim.notify
+      vim.notify = function() end
+      local buf = vim.api.nvim_create_buf(false, true)
+      local record = {
+        id = "thinking-clear",
+        adapter = "local",
+        title = "Thinking clear",
+        created_at = 123,
+        bufnr = buf,
+        messages = {},
+        api_adapter = {
+          set_thinking = function(mode)
+            assert.equals("low", mode)
+            return true, "thinking mode: low"
+          end,
+        },
+      }
+
+      local ok, err = pcall(function()
+        session._open_api_input(record, { data_dir = vim.fn.tempname() }, {
+          initial_lines = { "Me:", "/thinking low" },
+          auto_send = true,
+        })
+
+        local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+        assert.are.same({
+          "Me:",
+          "",
+          "Press <C-s>, <C-CR>, or <M-CR> to send",
+        }, lines)
+      end)
+
+      vim.notify = old_notify
+      if vim.api.nvim_buf_is_valid(buf) then
+        vim.api.nvim_buf_delete(buf, { force = true })
+      end
+      assert.is_true(ok, err)
+    end)
+
+    it("clears the inline draft after interactive /thinking selection", function()
+      local old_notify = vim.notify
+      local old_select = vim.ui.select
+      vim.notify = function() end
+      vim.ui.select = function(_, _, cb) cb("medium") end
+      local buf = vim.api.nvim_create_buf(false, true)
+      local record = {
+        id = "thinking-picker-clear",
+        adapter = "local",
+        title = "Thinking picker clear",
+        created_at = 123,
+        bufnr = buf,
+        messages = {},
+        api_adapter = {
+          set_thinking = function(mode)
+            assert.equals("medium", mode)
+            return true, "thinking mode: medium"
+          end,
+        },
+      }
+
+      local ok, err = pcall(function()
+        session._open_api_input(record, { data_dir = vim.fn.tempname() }, {
+          initial_lines = { "Me:", "/thinking" },
+          auto_send = true,
+        })
+
+        local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+        assert.are.same({
+          "Me:",
+          "",
+          "Press <C-s>, <C-CR>, or <M-CR> to send",
+        }, lines)
+      end)
+
+      vim.notify = old_notify
+      vim.ui.select = old_select
+      if vim.api.nvim_buf_is_valid(buf) then
+        vim.api.nvim_buf_delete(buf, { force = true })
+      end
+      assert.is_true(ok, err)
+    end)
+
     it("handles /memory save without writing to the project tree", function()
       local tmp = vim.fn.tempname()
       local cwd = vim.fn.tempname()

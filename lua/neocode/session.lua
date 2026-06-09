@@ -1488,6 +1488,7 @@ function M._open_api_input(record, config, opts)
     end
 
     if M._handle_local_command(text, record, config) then
+      M._refresh_api_chat(record, { draft = true, editable = true })
       return
     end
 
