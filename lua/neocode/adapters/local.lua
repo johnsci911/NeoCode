@@ -32,6 +32,26 @@ local function provider_module(name)
   return require("neocode.providers.openai_compatible"), "openai_compatible"
 end
 
+local function apply_metadata(metadata, explicit_model, explicit_context_size, explicit_thinking_available)
+  if type(metadata) ~= "table" then return end
+  if not explicit_model and metadata.model and metadata.model ~= "" then
+    M.config.model = metadata.model
+  end
+  if not explicit_context_size and tonumber(metadata.context_size) then
+    M.config.context_size = tonumber(metadata.context_size)
+  end
+  M.config.estimated_context_size = metadata.estimated_context_size == true
+  if not explicit_thinking_available and type(metadata.thinking_available) == "boolean" then
+    M.config.thinking_available = metadata.thinking_available
+  end
+  if type(metadata.thinking_source) == "string" and metadata.thinking_source ~= "" then
+    M.config.thinking_source = metadata.thinking_source
+  end
+  if type(metadata.reasoning_format) == "string" and metadata.reasoning_format ~= "" then
+    M.config.reasoning_format = metadata.reasoning_format
+  end
+end
+
 local function ensure_setup()
   if not M.config then M.setup({}) end
 end
@@ -232,6 +252,7 @@ end
 
 function M.setup(opts)
   opts = opts or {}
+  local explicit_provider = opts.provider ~= nil
   local explicit_model = opts.model ~= nil
   local explicit_context_size = opts.context_size ~= nil
   local explicit_thinking_available = opts.thinking_available ~= nil
@@ -246,24 +267,23 @@ function M.setup(opts)
     read_json = M.config.read_json,
   })
   local metadata = M.provider.probe_metadata and M.provider:probe_metadata() or nil
-  if type(metadata) == "table" then
-    if not explicit_model and metadata.model and metadata.model ~= "" then
-      M.config.model = metadata.model
-    end
-    if not explicit_context_size and tonumber(metadata.context_size) then
-      M.config.context_size = tonumber(metadata.context_size)
-    end
-    M.config.estimated_context_size = metadata.estimated_context_size == true
-    if not explicit_thinking_available and type(metadata.thinking_available) == "boolean" then
-      M.config.thinking_available = metadata.thinking_available
-    end
-    if type(metadata.thinking_source) == "string" and metadata.thinking_source ~= "" then
-      M.config.thinking_source = metadata.thinking_source
-    end
-    if type(metadata.reasoning_format) == "string" and metadata.reasoning_format ~= "" then
-      M.config.reasoning_format = metadata.reasoning_format
+  if not explicit_provider and normalized_name == "openai_compatible" then
+    local llama_provider_factory = require("neocode.providers.llama_server")
+    local llama_provider = llama_provider_factory.setup({
+      base_url = M.config.base_url,
+      model = M.config.model,
+      fallback_context_size = M.config.context_size,
+      probe = M.config.provider_probe,
+      read_json = M.config.read_json,
+    })
+    local llama_metadata = llama_provider.probe_metadata and llama_provider:probe_metadata() or nil
+    if type(llama_metadata) == "table" and llama_metadata.thinking_available == true then
+      M.provider = llama_provider
+      M.config.provider = "llama_server"
+      metadata = llama_metadata
     end
   end
+  apply_metadata(metadata, explicit_model, explicit_context_size, explicit_thinking_available)
   M.base_url = M.provider.base_url
   M.model = M.config.model or M.provider.model
   return M

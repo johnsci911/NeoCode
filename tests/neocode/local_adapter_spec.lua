@@ -1,9 +1,13 @@
 local neocode = require("neocode")
 local local_adapter = require("neocode.adapters.local")
 
+local function no_metadata_read()
+  return nil
+end
+
 describe("local adapter", function()
   before_each(function()
-    local_adapter.setup({})
+    local_adapter.setup({ read_json = no_metadata_read })
   end)
 
   it("exposes NeoCode Local as an API-backed session adapter", function()
@@ -26,11 +30,70 @@ describe("local adapter", function()
   end)
 
   it("defaults to OpenAI-compatible local endpoint settings", function()
-    local_adapter.setup({})
+    local_adapter.setup({ read_json = no_metadata_read })
 
     assert.equals("http://127.0.0.1:8080/v1", local_adapter.config.base_url)
     assert.equals("openai_compatible", local_adapter.config.provider)
     assert.equals(32768, local_adapter.config.context_size)
+  end)
+
+  it("auto-detects llama-server thinking metadata from the default local endpoint", function()
+    local_adapter.setup({
+      base_url = "http://127.0.0.1:8080/v1",
+      read_json = function(url)
+        if url:match("/v1/models$") then
+          return {
+            data = {
+              {
+                id = "MoonRide/gemma-4-12B-it-heretic-custom-GGUF",
+                capabilities = { "completion", "multimodal" },
+              },
+            },
+          }
+        end
+        if url:match("/props$") then
+          return {
+            model_alias = "MoonRide/gemma-4-12B-it-heretic-custom-GGUF",
+            chat_template = "{% if enable_thinking is defined and enable_thinking %}<|think|>{% endif %}",
+            default_generation_settings = { n_ctx = 24576 },
+          }
+        end
+        if url:match("/slots$") then
+          return {
+            { params = { reasoning_format = "deepseek", reasoning_in_content = false } },
+          }
+        end
+      end,
+    })
+
+    assert.equals("llama_server", local_adapter.config.provider)
+    assert.is_true(local_adapter.thinking_available())
+    assert.equals("deepseek", local_adapter.config.reasoning_format)
+
+    local ok, message = local_adapter.set_thinking("low")
+    assert.is_true(ok)
+    assert.is_truthy(message:find("slots reasoning_format=deepseek", 1, true))
+  end)
+
+  it("respects an explicit OpenAI-compatible provider even when llama-server metadata exists", function()
+    local_adapter.setup({
+      provider = "openai_compatible",
+      base_url = "http://127.0.0.1:8080/v1",
+      read_json = function(url)
+        if url:match("/v1/models$") then
+          return { data = { { id = "generic-local-model" } } }
+        end
+        if url:match("/props$") then
+          return { chat_template = "{% if enable_thinking %}<think>{% endif %}" }
+        end
+        if url:match("/slots$") then
+          return { { params = { reasoning_format = "deepseek" } } }
+        end
+      end,
+    })
+
+    assert.equals("openai_compatible", local_adapter.config.provider)
+    assert.is_false(local_adapter.thinking_available())
   end)
 
   it("can prefer llama-server provider enhancements", function()
@@ -38,6 +101,7 @@ describe("local adapter", function()
       provider = "llama_server",
       base_url = "http://127.0.0.1:8080/v1",
       model = "local-model",
+      read_json = no_metadata_read,
     })
 
     assert.equals("llama_server", local_adapter.config.provider)
@@ -153,7 +217,7 @@ describe("local adapter", function()
   end)
 
   it("builds OpenAI chat completion payloads with tools when provided", function()
-    local_adapter.setup({ model = "local-model", temperature = 0.1, max_tokens = 123 })
+    local_adapter.setup({ model = "local-model", temperature = 0.1, max_tokens = 123, read_json = no_metadata_read })
 
     local payload = local_adapter._request_payload({
       { role = "user", content = "read README" },
@@ -174,7 +238,7 @@ describe("local adapter", function()
   end)
 
   it("sanitizes corrupted assistant history before building request payloads", function()
-    local_adapter.setup({ model = "local-model" })
+    local_adapter.setup({ model = "local-model", read_json = no_metadata_read })
 
     local payload = local_adapter._request_payload({
       { role = "user", content = "hello" },
@@ -197,7 +261,7 @@ describe("local adapter", function()
   end)
 
   it("extracts response text and context stats from OpenAI responses", function()
-    local_adapter.setup({ provider = "llama_server", model = "local-model", context_size = 24576 })
+    local_adapter.setup({ provider = "llama_server", model = "local-model", context_size = 24576, read_json = no_metadata_read })
 
     local text, stats = local_adapter._complete_from_result({
       choices = {
@@ -215,7 +279,7 @@ describe("local adapter", function()
   end)
 
   it("confirms thinking only when llama.cpp returns reasoning content", function()
-    local_adapter.setup({ provider = "llama_server", model = "local-model", thinking = "low", thinking_available = true })
+    local_adapter.setup({ provider = "llama_server", model = "local-model", thinking = "low", thinking_available = true, read_json = no_metadata_read })
 
     local text, stats = local_adapter._complete_from_result({
       choices = {
@@ -230,7 +294,7 @@ describe("local adapter", function()
   end)
 
   it("strips leaked local thinking and chat-template preambles from responses", function()
-    local_adapter.setup({ provider = "llama_server", model = "local-model" })
+    local_adapter.setup({ provider = "llama_server", model = "local-model", read_json = no_metadata_read })
 
     local text = local_adapter._complete_from_result({
       choices = {
@@ -246,7 +310,7 @@ describe("local adapter", function()
   end)
 
   it("strips reserved channel-thought artifacts from responses", function()
-    local_adapter.setup({ provider = "llama_server", model = "local-model" })
+    local_adapter.setup({ provider = "llama_server", model = "local-model", read_json = no_metadata_read })
 
     local text = local_adapter._complete_from_result({
       choices = {
@@ -262,7 +326,7 @@ describe("local adapter", function()
   end)
 
   it("normalizes model-escaped markdown fences in responses", function()
-    local_adapter.setup({ provider = "llama_server", model = "local-model" })
+    local_adapter.setup({ provider = "llama_server", model = "local-model", read_json = no_metadata_read })
 
     local text = local_adapter._complete_from_result({
       choices = {
@@ -287,7 +351,7 @@ describe("local adapter", function()
   end)
 
   it("executes tool calls and continues with tool results", function()
-    local_adapter.setup({ model = "local-model" })
+    local_adapter.setup({ model = "local-model", read_json = no_metadata_read })
     local requests = {}
     local_adapter._transport = function(messages, extra, callback)
       table.insert(requests, { messages = vim.deepcopy(messages), extra = extra })
@@ -357,7 +421,7 @@ describe("local adapter", function()
   end)
 
   it("sanitizes assistant tool-call content before follow-up tool requests", function()
-    local_adapter.setup({ model = "local-model" })
+    local_adapter.setup({ model = "local-model", read_json = no_metadata_read })
     local requests = {}
     local_adapter._transport = function(messages, extra, callback)
       table.insert(requests, { messages = vim.deepcopy(messages), extra = extra })
@@ -403,7 +467,7 @@ describe("local adapter", function()
   end)
 
   it("continues multi-round tool loops through write-file calls", function()
-    local_adapter.setup({ model = "local-model", max_tool_rounds = 3 })
+    local_adapter.setup({ model = "local-model", max_tool_rounds = 3, read_json = no_metadata_read })
     local requests = {}
     local_adapter._transport = function(messages, extra, callback)
       table.insert(requests, { messages = vim.deepcopy(messages), extra = extra })
