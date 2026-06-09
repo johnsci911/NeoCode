@@ -274,7 +274,7 @@ When no instruction files exist, auto-detects:
 - Save and resume conversations across Neovim restarts
 - `/compact` command — summarize NeoCode-managed API conversations to free context
 - `/rename <title>` command or `R` keymap — rename the current session
-- Session history picker with timestamps (`<C-h>` keymap)
+- Session history picker with timestamps (`<C-S-h>` keymap)
 - Multi-select delete (`<Tab>` to select, `d` to delete)
 - Auto-switch to next session on close (`Q`)
 
@@ -306,7 +306,7 @@ Memory and selected skills are injected as system context for NeoCode-managed AP
 | Keymap | Action |
 |--------|--------|
 | `i` | Insert in NeoCode Local's inline draft, or open the multi-line input window when inline editing is unavailable |
-| `<C-h>` | Session history picker (resume/delete/rename) |
+| `<C-S-h>` | Session history picker (resume/delete/rename) |
 | `R` | Rename current session |
 | `<C-p>` | Paste image from clipboard |
 | `<C-c>` | Interrupt the AI |
@@ -340,7 +340,7 @@ Memory and selected skills are injected as system context for NeoCode-managed AP
 | `/skill save <name> <instructions>` | Save a reusable skill in NeoCode's data directory |
 | `/skill select <name>[,name...]` | Manually select skills for future turns |
 
-### Session picker (`<C-h>`)
+### Session picker (`<C-S-h>`)
 
 | Keymap | Action |
 |--------|--------|
@@ -359,7 +359,7 @@ require("neocode").setup({
   keymap_prefix      = "<leader>ai",
   data_dir           = vim.fn.stdpath("data") .. "/neocode",
   telescope_fallback = true,
-  winbar             = "  ? help  <C-h> resume  i input  R rename  <C-p> image  <C-c> stop  H toggle  { } cycle\n",
+  winbar             = "  ? help  <C-S-h> resume  i input  R rename  <C-p> image  <C-c> stop  H toggle  { } cycle\n",
   auto_compact       = {
     enabled = false, -- API sessions only; CLI adapters such as Continue own their own history
     threshold = 0.8, -- compact at 80% of context_size, e.g. ~20k/24.5k
@@ -415,7 +415,7 @@ function M.attach_image(session, path)
   vim.fn.chansend(session.job_id, path .. "\n")
 end
 
--- (Optional) Native session picker — powers the `<C-h>` keymap
+-- (Optional) Native session picker — powers the `<C-S-h>` keymap
 function M.resume_cmd(opts)
   return { cmd = "myai", args = { "--resume" }, cwd = opts.cwd }
 end
