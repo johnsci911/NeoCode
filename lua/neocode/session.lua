@@ -250,6 +250,19 @@ function M._build_skills_context(config)
 end
 
 function M._handle_local_command(text, record, config)
+  local thinking_command = text:match("^%s*/thinking%s*(.-)%s*$")
+  if thinking_command then
+    local thinking_mode = thinking_command ~= "" and thinking_command or nil
+    local adapter = record and record.api_adapter
+    if adapter and type(adapter.set_thinking) == "function" then
+      local ok, message = adapter.set_thinking(thinking_mode)
+      vim.notify("neocode: " .. tostring(message or (ok and "thinking mode updated" or "Thinking mode not available")), ok and vim.log.levels.INFO or vim.log.levels.WARN)
+    else
+      vim.notify("neocode: Thinking mode not available", vim.log.levels.WARN)
+    end
+    return true
+  end
+
   local memory_text = text:match("^%s*/memory%s+save%s+(.+)%s*$")
   if memory_text then
     local ok, memory = pcall(require, "neocode.memory")

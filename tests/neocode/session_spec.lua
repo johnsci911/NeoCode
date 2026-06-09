@@ -175,6 +175,77 @@ describe("session", function()
   end)
 
   describe("local memory and skill commands", function()
+    it("handles /thinking through the active API adapter", function()
+      local notified = {}
+      local old_notify = vim.notify
+      vim.notify = function(message, level)
+        table.insert(notified, { message = message, level = level })
+      end
+      local record = {
+        api_adapter = {
+          set_thinking = function(mode)
+            assert.equals("low", mode)
+            return true, "thinking mode: low"
+          end,
+        },
+      }
+
+      local ok, err = pcall(function()
+        assert.is_true(session._handle_local_command("/thinking low", record, {}))
+      end)
+
+      vim.notify = old_notify
+      assert.is_true(ok, err)
+      assert.equals("neocode: thinking mode: low", notified[1].message)
+    end)
+
+    it("shows unavailable when /thinking is rejected by the adapter", function()
+      local notified = {}
+      local old_notify = vim.notify
+      vim.notify = function(message, level)
+        table.insert(notified, { message = message, level = level })
+      end
+      local record = {
+        api_adapter = {
+          set_thinking = function()
+            return false, "Thinking mode not available"
+          end,
+        },
+      }
+
+      local ok, err = pcall(function()
+        assert.is_true(session._handle_local_command("/thinking high", record, {}))
+      end)
+
+      vim.notify = old_notify
+      assert.is_true(ok, err)
+      assert.equals("neocode: Thinking mode not available", notified[1].message)
+    end)
+
+    it("handles /thinking without arguments as adapter usage", function()
+      local notified = {}
+      local old_notify = vim.notify
+      vim.notify = function(message, level)
+        table.insert(notified, { message = message, level = level })
+      end
+      local record = {
+        api_adapter = {
+          set_thinking = function(mode)
+            assert.is_nil(mode)
+            return false, "usage: /thinking off|low|medium|high|max"
+          end,
+        },
+      }
+
+      local ok, err = pcall(function()
+        assert.is_true(session._handle_local_command("/thinking", record, {}))
+      end)
+
+      vim.notify = old_notify
+      assert.is_true(ok, err)
+      assert.equals("neocode: usage: /thinking off|low|medium|high|max", notified[1].message)
+    end)
+
     it("handles /memory save without writing to the project tree", function()
       local tmp = vim.fn.tempname()
       local cwd = vim.fn.tempname()
