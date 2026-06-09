@@ -398,6 +398,70 @@ describe("session", function()
     end)
   end)
 
+  describe("api chat metadata display", function()
+    it("shows context window and supported thinking mode in refreshed local chat", function()
+      local buf = vim.api.nvim_create_buf(false, true)
+      local record = {
+        bufnr = buf,
+        messages = {},
+        api_adapter = {
+          config = { context_size = 24576, thinking = "medium" },
+          thinking_available = function() return true end,
+          thinking_mode = function() return "medium" end,
+        },
+      }
+
+      session._refresh_api_chat(record, { draft = true, editable = true })
+
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      vim.api.nvim_buf_delete(buf, { force = true })
+      assert.equals("Context window: 24576 · Thinking: medium", lines[1])
+      assert.equals("Me:", lines[3])
+    end)
+
+    it("hides thinking mode when the adapter does not support thinking", function()
+      local buf = vim.api.nvim_create_buf(false, true)
+      local record = {
+        bufnr = buf,
+        messages = {},
+        api_adapter = {
+          config = { context_size = 32768, thinking = "high" },
+          thinking_available = function() return false end,
+          thinking_mode = function() return "high" end,
+        },
+      }
+
+      session._refresh_api_chat(record, { draft = true, editable = true })
+
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      vim.api.nvim_buf_delete(buf, { force = true })
+      assert.equals("Context window: 32768", lines[1])
+      assert.is_falsy(table.concat(lines, "\n"):find("Thinking:", 1, true))
+    end)
+
+    it("keeps chat refresh working when adapter thinking helpers fail", function()
+      local buf = vim.api.nvim_create_buf(false, true)
+      local record = {
+        bufnr = buf,
+        messages = {},
+        api_adapter = {
+          config = { context_size = 16384, thinking = "high" },
+          thinking_available = function() error("probe failed") end,
+          thinking_mode = function() error("mode failed") end,
+        },
+      }
+
+      assert.has_no_error(function()
+        session._refresh_api_chat(record, { draft = true, editable = true })
+      end)
+
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      vim.api.nvim_buf_delete(buf, { force = true })
+      assert.equals("Context window: 16384", lines[1])
+      assert.is_falsy(table.concat(lines, "\n"):find("Thinking:", 1, true))
+    end)
+  end)
+
   describe("_extract_direct_read_path", function()
     it("extracts an explicit absolute file path from read prompts", function()
       assert.equals(

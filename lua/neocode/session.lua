@@ -349,7 +349,30 @@ function M._refresh_api_chat(record, opts)
   local chat_buffer = require("neocode.chat_buffer")
   opts = opts or {}
   if not record or not record.bufnr or not vim.api.nvim_buf_is_valid(record.bufnr) then return end
-  chat_buffer.refresh(record.bufnr, record.messages or {}, { draft = opts.draft == true })
+  local adapter = record.api_adapter or {}
+  local adapter_config = adapter.config or {}
+  local thinking_available = false
+  if type(adapter.thinking_available) == "function" then
+    local ok, value = pcall(adapter.thinking_available)
+    thinking_available = ok and value == true
+  elseif type(adapter_config.thinking_available) == "boolean" then
+    thinking_available = adapter_config.thinking_available
+  end
+  local thinking_mode = nil
+  if thinking_available and type(adapter.thinking_mode) == "function" then
+    local ok, value = pcall(adapter.thinking_mode)
+    if ok then thinking_mode = value end
+  elseif thinking_available then
+    thinking_mode = adapter_config.thinking or "off"
+  end
+  chat_buffer.refresh(record.bufnr, record.messages or {}, {
+    draft = opts.draft == true,
+    status = {
+      context_size = adapter_config.context_size or adapter_config.context_length,
+      thinking_available = thinking_available,
+      thinking_mode = thinking_mode,
+    },
+  })
   vim.bo[record.bufnr].modifiable = opts.editable == true
   if opts.editable then
     local total = vim.api.nvim_buf_line_count(record.bufnr)
