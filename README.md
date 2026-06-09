@@ -122,7 +122,7 @@ llama.setup({
 
 The generated config uses the server's runtime context (`n_ctx`, for example `24576`) rather than the model's training context (`n_ctx_train`). If probing fails because `llama-server` is not running, NeoCode falls back to the adapter's configured `args`. When generation succeeds, NeoCode preserves other Continue CLI args and replaces only an existing `--config` argument with the generated config path.
 
-Resume also goes through Continue CLI. Pressing NeoCode's resume key for a Llama/Continue terminal launches `cn --resume`; if `dynamic_continue_config` is enabled, NeoCode first regenerates the config and resumes with `cn --resume --config <generated-file>`.
+Resume also goes through Continue CLI. Choosing a closed Llama/Continue session from `/session` launches `cn --resume`; if `dynamic_continue_config` is enabled, NeoCode first regenerates the config and resumes with `cn --resume --config <generated-file>`.
 
 ### With NeoCode Local
 
@@ -274,7 +274,7 @@ When no instruction files exist, auto-detects:
 - Save and resume conversations across Neovim restarts
 - `/compact` command — summarize NeoCode-managed API conversations to free context
 - `/rename <title>` command or `R` keymap — rename the current session
-- Session history picker with timestamps (`<C-S-h>` keymap)
+- `/session` command — open the session history picker with timestamps
 - Multi-select delete (`<Tab>` to select, `d` to delete)
 - Auto-switch to next session on close (`Q`)
 
@@ -306,7 +306,6 @@ Memory and selected skills are injected as system context for NeoCode-managed AP
 | Keymap | Action |
 |--------|--------|
 | `i` | Insert in NeoCode Local's inline draft, or open the multi-line input window when inline editing is unavailable |
-| `<C-S-h>` | Session history picker (resume/delete/rename) |
 | `R` | Rename current session |
 | `<C-p>` | Paste image from clipboard |
 | `<C-c>` | Interrupt the AI |
@@ -332,6 +331,7 @@ Memory and selected skills are injected as system context for NeoCode-managed AP
 | Command | Action |
 |---------|--------|
 | `/compact` | Summarize NeoCode-managed API conversations to free context |
+| `/session` | Open session history picker (resume/delete/rename) |
 | `/thinking [off\|low\|medium\|high\|max]` | Open an interactive thinking selector, or set llama.cpp thinking controls directly when the active server reports support |
 | `/rename <title>` | Rename current session |
 | `/readfile <path>` | Read an exact local file without web search |
@@ -340,7 +340,7 @@ Memory and selected skills are injected as system context for NeoCode-managed AP
 | `/skill save <name> <instructions>` | Save a reusable skill in NeoCode's data directory |
 | `/skill select <name>[,name...]` | Manually select skills for future turns |
 
-### Session picker (`<C-S-h>`)
+### Session picker (`/session`)
 
 | Keymap | Action |
 |--------|--------|
@@ -359,7 +359,7 @@ require("neocode").setup({
   keymap_prefix      = "<leader>ai",
   data_dir           = vim.fn.stdpath("data") .. "/neocode",
   telescope_fallback = true,
-  winbar             = "  ? help  <C-S-h> resume  i input  R rename  <C-p> image  <C-c> stop  H toggle  { } cycle\n",
+  winbar             = "  ? help  /session history  i input  R rename  <C-p> image  <C-c> stop  H toggle  { } cycle\n",
   auto_compact       = {
     enabled = false, -- API sessions only; CLI adapters such as Continue own their own history
     threshold = 0.8, -- compact at 80% of context_size, e.g. ~20k/24.5k
@@ -415,7 +415,7 @@ function M.attach_image(session, path)
   vim.fn.chansend(session.job_id, path .. "\n")
 end
 
--- (Optional) Native session picker — powers the `<C-S-h>` keymap
+-- (Optional) Native session picker — used when /session resumes a CLI session
 function M.resume_cmd(opts)
   return { cmd = "myai", args = { "--resume" }, cwd = opts.cwd }
 end
