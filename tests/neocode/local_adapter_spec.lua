@@ -62,6 +62,80 @@ describe("local adapter", function()
     assert.equals(24576, local_adapter.config.context_size)
   end)
 
+  it("uses provider metadata, not model names, to determine thinking availability", function()
+    local_adapter.setup({
+      provider = "llama_server",
+      provider_probe = function()
+        return {
+          model = "qwen3-thinking-looking-name",
+          thinking_available = false,
+        }
+      end,
+    })
+
+    assert.is_false(local_adapter.thinking_available())
+    local ok, message = local_adapter.set_thinking("medium")
+    assert.is_false(ok)
+    assert.equals("Thinking mode not available", message)
+  end)
+
+  it("allows thinking presets only when provider metadata reports support", function()
+    local_adapter.setup({
+      provider = "llama_server",
+      provider_probe = function()
+        return {
+          model = "metadata-enabled-model",
+          thinking_available = true,
+        }
+      end,
+    })
+
+    local ok, message = local_adapter.set_thinking("medium")
+    assert.is_true(ok)
+    assert.equals("thinking mode: medium", message)
+
+    local payload = local_adapter._request_payload({
+      { role = "user", content = "think" },
+    })
+
+    assert.is_true(payload.enable_thinking)
+    assert.is_true(payload.chat_template_kwargs.enable_thinking)
+    assert.equals("medium", payload.chat_template_kwargs.reasoning_effort)
+    assert.equals(2048, payload.thinking_budget_tokens)
+  end)
+
+  it("omits thinking fields in payloads when metadata does not report support", function()
+    local_adapter.setup({
+      model = "deepseek-r1-looking-name",
+      thinking = "high",
+      thinking_available = false,
+    })
+
+    local payload = local_adapter._request_payload({
+      { role = "user", content = "think" },
+    })
+
+    assert.is_nil(payload.enable_thinking)
+    assert.is_nil(payload.chat_template_kwargs)
+    assert.is_nil(payload.thinking_budget_tokens)
+  end)
+
+  it("sends explicit thinking-off fields when metadata reports support and mode is off", function()
+    local_adapter.setup({
+      model = "metadata-enabled-model",
+      thinking = "off",
+      thinking_available = true,
+    })
+
+    local payload = local_adapter._request_payload({
+      { role = "user", content = "hello" },
+    })
+
+    assert.is_false(payload.enable_thinking)
+    assert.is_false(payload.chat_template_kwargs.enable_thinking)
+    assert.equals(0, payload.thinking_budget_tokens)
+  end)
+
   it("builds text and image user messages for the session flow", function()
     local text_only = local_adapter._build_user_message("hello", nil)
     local with_image = local_adapter._build_user_message("look", "abc123")
@@ -90,8 +164,8 @@ describe("local adapter", function()
     assert.is_false(payload.stream)
     assert.equals(0.1, payload.temperature)
     assert.equals(123, payload.max_tokens)
-    assert.is_false(payload.enable_thinking)
-    assert.is_false(payload.chat_template_kwargs.enable_thinking)
+    assert.is_nil(payload.enable_thinking)
+    assert.is_nil(payload.chat_template_kwargs)
     assert.equals("read README", payload.messages[1].content)
     assert.equals("neocode__read_file", payload.tools[1]["function"].name)
   end)

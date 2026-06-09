@@ -13,6 +13,16 @@ M.defaults = {
   temperature = 0.2,
   max_tokens = 4096,
   max_tool_rounds = 5,
+  thinking = "off",
+  thinking_available = nil,
+}
+
+local THINKING_PRESETS = {
+  off = { enable_thinking = false, thinking_budget_tokens = 0 },
+  low = { enable_thinking = true, reasoning_effort = "low", thinking_budget_tokens = 512 },
+  medium = { enable_thinking = true, reasoning_effort = "medium", thinking_budget_tokens = 2048 },
+  high = { enable_thinking = true, reasoning_effort = "high", thinking_budget_tokens = 8192 },
+  max = { enable_thinking = true, reasoning_effort = nil, thinking_budget_tokens = nil },
 }
 
 local function provider_module(name)
@@ -24,6 +34,67 @@ end
 
 local function ensure_setup()
   if not M.config then M.setup({}) end
+end
+
+local function normalize_thinking_mode(mode)
+  local normalized = tostring(mode or "off"):lower()
+  if normalized == "none" or normalized == "false" or normalized == "0" then normalized = "off" end
+  if THINKING_PRESETS[normalized] then return normalized end
+  return nil
+end
+
+function M._is_thinking_model(_, config)
+  config = config or M.config or {}
+  if type(config.thinking_available) == "boolean" then return config.thinking_available end
+  return false
+end
+
+function M.thinking_available()
+  ensure_setup()
+  return M._is_thinking_model(M.model, M.config) == true
+end
+
+function M.thinking_mode()
+  ensure_setup()
+  return normalize_thinking_mode(M.config.thinking) or "off"
+end
+
+function M.set_thinking(mode)
+  ensure_setup()
+  local normalized = normalize_thinking_mode(mode)
+  if not normalized then
+    return false, "usage: /thinking off|low|medium|high|max"
+  end
+  if normalized ~= "off" and not M.thinking_available() then
+    return false, "Thinking mode not available"
+  end
+  M.config.thinking = normalized
+  return true, "thinking mode: " .. normalized
+end
+
+function M._thinking_payload(mode, model, config)
+  mode = normalize_thinking_mode(mode)
+  config = config or M.config or {}
+  if not M._is_thinking_model(model, config) then
+    return {}
+  end
+  if not mode or mode == "off" then
+    return {
+      enable_thinking = false,
+      chat_template_kwargs = { enable_thinking = false },
+      thinking_budget_tokens = 0,
+    }
+  end
+
+  local preset = THINKING_PRESETS[mode]
+  local kwargs = { enable_thinking = true }
+  if preset.reasoning_effort then kwargs.reasoning_effort = preset.reasoning_effort end
+  local payload = {
+    enable_thinking = true,
+    chat_template_kwargs = kwargs,
+  }
+  if preset.thinking_budget_tokens then payload.thinking_budget_tokens = preset.thinking_budget_tokens end
+  return payload
 end
 
 local function trim_response(text)
@@ -153,6 +224,7 @@ function M.setup(opts)
   opts = opts or {}
   local explicit_model = opts.model ~= nil
   local explicit_context_size = opts.context_size ~= nil
+  local explicit_thinking_available = opts.thinking_available ~= nil
   M.config = vim.tbl_deep_extend("force", M.defaults, opts or {})
   local provider_factory, normalized_name = provider_module(M.config.provider)
   M.config.provider = normalized_name
@@ -172,6 +244,9 @@ function M.setup(opts)
       M.config.context_size = tonumber(metadata.context_size)
     end
     M.config.estimated_context_size = metadata.estimated_context_size == true
+    if not explicit_thinking_available and type(metadata.thinking_available) == "boolean" then
+      M.config.thinking_available = metadata.thinking_available
+    end
   end
   M.base_url = M.provider.base_url
   M.model = M.config.model or M.provider.model
@@ -242,9 +317,8 @@ local function request_payload(messages, extra)
     stream = false,
     temperature = M.config.temperature,
     max_tokens = M.config.max_tokens,
-    enable_thinking = false,
-    chat_template_kwargs = { enable_thinking = false },
   }
+  payload = vim.tbl_deep_extend("force", payload, M._thinking_payload(M.config.thinking, M.model, M.config))
   if extra.tools and #extra.tools > 0 then
     payload.tools = extra.tools
   end
