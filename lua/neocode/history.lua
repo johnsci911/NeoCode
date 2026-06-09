@@ -95,9 +95,7 @@ function M.pick(config)
 
         if sel.status == "active" then
           local active = session._get(sel.id)
-          if active and active.bufnr and vim.api.nvim_buf_is_valid(active.bufnr) then
-            vim.api.nvim_set_current_buf(active.bufnr)
-          end
+          session._show_session_in_window(active, vim.api.nvim_get_current_win())
         else
           local adapter = config.adapters and config.adapters[sel.adapter]
           if not adapter then
@@ -123,8 +121,7 @@ function M.pick(config)
           record.created_at = sel.created_at
           session._add(record)
 
-          vim.cmd("vsplit")
-          local win  = vim.api.nvim_get_current_win()
+          local win = session._window_for_session_open(record)
           local argv = vim.list_extend({ resume_spec.cmd }, resume_spec.args or {})
           session._open_terminal(record, argv, win, config)
         end
@@ -187,27 +184,7 @@ function M.pick(config)
         local adapter = config.adapters and config.adapters[config.default_adapter]
         if not adapter then return end
 
-        -- Find existing NeoCode window to reuse
-        local current = session._current()
-        local reuse_win = nil
-        if current and current.winid and vim.api.nvim_win_is_valid(current.winid) then
-          reuse_win = current.winid
-        end
-
         session.create(adapter, nil, config)
-
-        -- Move new session buffer into existing window if we had one
-        if reuse_win then
-          local new = session._current()
-          if new and new.bufnr and vim.api.nvim_buf_is_valid(new.bufnr) then
-            -- Close the extra split that create() opened
-            if new.winid and new.winid ~= reuse_win and vim.api.nvim_win_is_valid(new.winid) then
-              vim.api.nvim_win_close(new.winid, true)
-            end
-            vim.api.nvim_win_set_buf(reuse_win, new.bufnr)
-            new.winid = reuse_win
-          end
-        end
       end)
 
       return true

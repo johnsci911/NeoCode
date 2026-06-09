@@ -150,6 +150,72 @@ local function extend_list(dst, src)
   end
 end
 
+local function claim_window_for(record, win)
+  if not record or not win or not vim.api.nvim_win_is_valid(win) then return end
+  for _, session_record in pairs(_sessions) do
+    if session_record ~= record and session_record.winid == win then
+      session_record.winid = nil
+    end
+  end
+  record.winid = win
+end
+
+function M._claim_window_for(record, win)
+  claim_window_for(record, win)
+end
+
+local function window_shows_record(win, record)
+  return record
+    and record.bufnr
+    and vim.api.nvim_buf_is_valid(record.bufnr)
+    and win
+    and vim.api.nvim_win_is_valid(win)
+    and vim.api.nvim_win_get_buf(win) == record.bufnr
+end
+
+function M._show_session_in_window(record, win)
+  if not record or not record.bufnr or not vim.api.nvim_buf_is_valid(record.bufnr) then return false end
+  if not win or not vim.api.nvim_win_is_valid(win) then
+    win = vim.api.nvim_get_current_win()
+  end
+  if not win or not vim.api.nvim_win_is_valid(win) then return false end
+
+  vim.api.nvim_win_set_buf(win, record.bufnr)
+  _current_id = record.id
+  claim_window_for(record, win)
+  return true
+end
+
+function M._window_for_session_open(record)
+  local current = M._current()
+  if current and current.winid and window_shows_record(current.winid, current) then
+    local win = current.winid
+    claim_window_for(record, win)
+    return win
+  elseif current and current.winid and vim.api.nvim_win_is_valid(current.winid) then
+    current.winid = nil
+  end
+
+  local ok_cur_win, cur_win = pcall(vim.api.nvim_get_current_win)
+  if ok_cur_win and cur_win and vim.api.nvim_win_is_valid(cur_win) then
+    local cur_buf = vim.api.nvim_win_get_buf(cur_win)
+    for _, session_record in pairs(_sessions) do
+      if session_record.bufnr == cur_buf then
+        claim_window_for(record, cur_win)
+        return cur_win
+      end
+    end
+  end
+
+  vim.cmd("vsplit")
+  local win = vim.api.nvim_get_current_win()
+  if not win or not vim.api.nvim_win_is_valid(win) then
+    error("NeoCode could not open a valid session window")
+  end
+  claim_window_for(record, win)
+  return win
+end
+
 function M._build_project_tools(text, cwd)
   local ok_web, web_search = pcall(require, "neocode.web_search")
   local wants_project_tools = M._needs_project_tools(text)
@@ -1032,6 +1098,7 @@ function M._open_terminal(record, argv, win, config, opts)
   record.bufnr  = buf
   record.winid  = win
   record.job_id = job_id
+  _current_id = record.id
 
   vim.wo[win].winbar = config.winbar or ""
   vim.wo[win].list   = false
@@ -1067,10 +1134,9 @@ end
 function M._create_with_title(adapter, title, config)
   local record = M._new_record(adapter.name, title)
   M._add(record)
-  _current_id = record.id
 
-  vim.cmd("vsplit")
-  local win  = vim.api.nvim_get_current_win()
+  local win  = M._window_for_session_open(record)
+  _current_id = record.id
   local spec = adapter.launch_cmd({ cwd = vim.fn.getcwd(), name = record.title })
   local argv = vim.list_extend({ spec.cmd }, spec.args or {})
   M._open_terminal(record, argv, win, config)
@@ -1085,7 +1151,6 @@ function M.create_api(adapter, title, config)
   record.pending_image_b64 = nil
   record.cwd = require("neocode.context").find_project_root()
   M._add(record)
-  _current_id = record.id
 
   local saved = M._load_api_messages(config, record)
   if #saved > 0 then
@@ -1100,10 +1165,9 @@ function M.create_api(adapter, title, config)
   local buf = chat_buffer.create(record.messages, { draft = true })
   record.bufnr = buf
 
-  vim.cmd("vsplit")
-  local win = vim.api.nvim_get_current_win()
+  local win = M._window_for_session_open(record)
+  _current_id = record.id
   vim.api.nvim_win_set_buf(win, buf)
-  record.winid = win
 
   vim.wo[win].wrap = true
   vim.wo[win].linebreak = true
@@ -1136,8 +1200,7 @@ function M.resume_api(adapter, session_data, config)
   -- Check if already in memory (avoid duplicates)
   local existing = M._get(session_data.id)
   if existing and existing.bufnr and vim.api.nvim_buf_is_valid(existing.bufnr) then
-    _current_id = existing.id
-    vim.api.nvim_set_current_buf(existing.bufnr)
+    M._show_session_in_window(existing, vim.api.nvim_get_current_win())
     return
   end
 
@@ -1159,7 +1222,6 @@ function M.resume_api(adapter, session_data, config)
     cwd           = session_data.cwd or require("neocode.context").find_project_root(),
   }
   M._add(record)
-  _current_id = record.id
 
   -- Load saved messages and clean up stale entries
   local saved = M._load_api_messages(config, record)
@@ -1189,25 +1251,10 @@ function M.resume_api(adapter, session_data, config)
   local buf = chat_buffer.create(record.messages, { draft = true })
   record.bufnr = buf
 
-  -- Reuse existing NeoCode window if possible, otherwise vsplit
-  local win = nil
-  local current = M._current()
-  if current and current.winid and vim.api.nvim_win_is_valid(current.winid) then
-    win = current.winid
-  else
-    -- Check if current window is a NeoCode buffer
-    local cur_win = vim.api.nvim_get_current_win()
-    local cur_buf = vim.api.nvim_win_get_buf(cur_win)
-    if vim.bo[cur_buf].buftype == "nofile" then
-      win = cur_win
-    else
-      vim.cmd("vsplit")
-      win = vim.api.nvim_get_current_win()
-    end
-  end
+  local win = M._window_for_session_open(record)
+  _current_id = record.id
 
   vim.api.nvim_win_set_buf(win, buf)
-  record.winid = win
 
   vim.wo[win].wrap = true
   vim.wo[win].linebreak = true
@@ -2089,11 +2136,7 @@ function M.cycle(direction, config)
   end
 
   local next_session = all[next_idx]
-  _current_id = next_session.id
-
-  if next_session.bufnr and vim.api.nvim_buf_is_valid(next_session.bufnr) then
-    vim.api.nvim_set_current_buf(next_session.bufnr)
-  end
+  M._show_session_in_window(next_session, vim.api.nvim_get_current_win())
 end
 
 -- Open session picker (Telescope or vim.ui.select fallback)
@@ -2117,10 +2160,7 @@ function M.pick(config)
 
   local function switch_to(id)
     local s = _sessions[id]
-    if s and s.bufnr and vim.api.nvim_buf_is_valid(s.bufnr) then
-      _current_id = id
-      vim.api.nvim_set_current_buf(s.bufnr)
-    end
+    M._show_session_in_window(s, vim.api.nvim_get_current_win())
   end
 
   if ok and use_telescope then
@@ -2191,24 +2231,33 @@ function M.close(config)
     s.pending_image = nil
   end
 
-  -- Delete the buffer
-  if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
-    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+  -- Switch to another session before deleting the visible buffer; wiping the
+  -- currently displayed buffer can close the window before ownership transfers.
+  local remaining = {}
+  for _, session_record in ipairs(M._all()) do
+    if session_record.id ~= closed_id then
+      table.insert(remaining, session_record)
+    end
   end
-
-  -- Switch to another session if one exists, otherwise close the window
-  local remaining = M._all()
   if #remaining > 0 then
     local next_session = remaining[1]
     _current_id = next_session.id
     if winid and vim.api.nvim_win_is_valid(winid) then
       if next_session.bufnr and vim.api.nvim_buf_is_valid(next_session.bufnr) then
         vim.api.nvim_win_set_buf(winid, next_session.bufnr)
-        next_session.winid = winid
+        claim_window_for(next_session, winid)
+        if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+          pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+        end
         vim.notify("neocode: switched to '" .. next_session.title .. "'", vim.log.levels.INFO)
         return
       end
     end
+  end
+
+  -- Delete the buffer
+  if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
   end
 
   -- No remaining sessions: close the window
@@ -2231,14 +2280,16 @@ end
 function M.show(config)
   local s = M._current()
   if not s or not s.bufnr or not vim.api.nvim_buf_is_valid(s.bufnr) then return end
-  if s.winid and vim.api.nvim_win_is_valid(s.winid) then
+  if s.winid and window_shows_record(s.winid, s) then
     vim.api.nvim_set_current_win(s.winid)
     return
+  elseif s.winid and vim.api.nvim_win_is_valid(s.winid) then
+    s.winid = nil
   end
   vim.cmd("vsplit")
   local win = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(win, s.bufnr)
-  s.winid = win
+  claim_window_for(s, win)
   vim.wo[win].winbar = config.winbar or ""
   vim.wo[win].list = false
   vim.cmd("startinsert")
@@ -2301,6 +2352,7 @@ function M._register_buf_keymaps(buf, record, config)
     local win      = vim.api.nvim_get_current_win()
     local prev_buf = vim.api.nvim_get_current_buf()
     local argv     = vim.list_extend({ spec.cmd }, spec.args or {})
+    claim_window_for(new_record, win)
     M._open_terminal(new_record, argv, win, config, { prev_buf = prev_buf })
   end, opts)
 

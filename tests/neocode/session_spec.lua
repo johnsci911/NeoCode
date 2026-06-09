@@ -789,6 +789,355 @@ describe("session", function()
     assert.equals(2, #session._all())
   end)
 
+  it("reuses the current NeoCode window when creating another CLI session", function()
+    local initial_win = vim.api.nvim_get_current_win()
+    local initial_windows = #vim.api.nvim_list_wins()
+    local old_termopen = vim.fn.termopen
+    vim.fn.termopen = function()
+      return 9001
+    end
+    local adapter = {
+      name = "mockcli",
+      launch_cmd = function()
+        return { cmd = "mockcli", args = {} }
+      end,
+    }
+
+    local ok, err = pcall(function()
+      session.create(adapter, "First CLI", { winbar = "" })
+      local after_first = #vim.api.nvim_list_wins()
+      session.create(adapter, "Second CLI", { winbar = "" })
+      local after_second = #vim.api.nvim_list_wins()
+      local first, second
+      for _, s in ipairs(session._all()) do
+        if s.title == "First CLI" then first = s end
+        if s.title == "Second CLI" then second = s end
+      end
+
+      assert.equals(initial_windows + 1, after_first)
+      assert.equals(after_first, after_second)
+      assert.is_nil(first.winid)
+      assert.is_number(second.winid)
+      assert.is_true(vim.api.nvim_win_is_valid(second.winid))
+    end)
+
+    vim.fn.termopen = old_termopen
+    for _, s in ipairs(session._all()) do
+      if s.bufnr and vim.api.nvim_buf_is_valid(s.bufnr) then
+        pcall(vim.api.nvim_buf_delete, s.bufnr, { force = true })
+      end
+    end
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      if win ~= initial_win and vim.api.nvim_win_is_valid(win) then
+        pcall(vim.api.nvim_win_close, win, true)
+      end
+    end
+    if vim.api.nvim_win_is_valid(initial_win) then
+      vim.api.nvim_set_current_win(initial_win)
+    end
+    assert.is_true(ok, err)
+  end)
+
+  it("reuses the current NeoCode window when creating another API session", function()
+    local initial_win = vim.api.nvim_get_current_win()
+    local initial_windows = #vim.api.nvim_list_wins()
+    local adapter = {
+      name = "local",
+      type = "api",
+      config = { context_size = 32768 },
+    }
+
+    local ok, err = pcall(function()
+      session.create(adapter, "First API", { data_dir = vim.fn.tempname(), winbar = "" })
+      local after_first = #vim.api.nvim_list_wins()
+      session.create(adapter, "Second API", { data_dir = vim.fn.tempname(), winbar = "" })
+      local after_second = #vim.api.nvim_list_wins()
+      local first, second
+      for _, s in ipairs(session._all()) do
+        if s.title == "First API" then first = s end
+        if s.title == "Second API" then second = s end
+      end
+
+      assert.equals(initial_windows + 1, after_first)
+      assert.equals(after_first, after_second)
+      assert.is_nil(first.winid)
+      assert.is_number(second.winid)
+      assert.is_true(vim.api.nvim_win_is_valid(second.winid))
+    end)
+
+    for _, s in ipairs(session._all()) do
+      if s.bufnr and vim.api.nvim_buf_is_valid(s.bufnr) then
+        pcall(vim.api.nvim_buf_delete, s.bufnr, { force = true })
+      end
+    end
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      if win ~= initial_win and vim.api.nvim_win_is_valid(win) then
+        pcall(vim.api.nvim_win_close, win, true)
+      end
+    end
+    if vim.api.nvim_win_is_valid(initial_win) then
+      vim.api.nvim_set_current_win(initial_win)
+    end
+    assert.is_true(ok, err)
+  end)
+
+  it("reclaims window ownership when switching back to a reused API session", function()
+    local initial_win = vim.api.nvim_get_current_win()
+    local adapter = {
+      name = "local",
+      type = "api",
+      config = { context_size = 32768 },
+    }
+
+    local ok, err = pcall(function()
+      session.create(adapter, "First API", { data_dir = vim.fn.tempname(), winbar = "" })
+      session.create(adapter, "Second API", { data_dir = vim.fn.tempname(), winbar = "" })
+      local first, second
+      for _, s in ipairs(session._all()) do
+        if s.title == "First API" then first = s end
+        if s.title == "Second API" then second = s end
+      end
+
+      local reused_win = second.winid
+      assert.is_nil(first.winid)
+      assert.is_true(session._show_session_in_window(first, reused_win))
+      assert.equals(reused_win, first.winid)
+      assert.is_nil(second.winid)
+      assert.equals(first, session._current())
+
+      session.hide()
+      assert.is_nil(first.winid)
+      assert.is_false(vim.api.nvim_win_is_valid(reused_win))
+    end)
+
+    for _, s in ipairs(session._all()) do
+      if s.bufnr and vim.api.nvim_buf_is_valid(s.bufnr) then
+        pcall(vim.api.nvim_buf_delete, s.bufnr, { force = true })
+      end
+    end
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      if win ~= initial_win and vim.api.nvim_win_is_valid(win) then
+        pcall(vim.api.nvim_win_close, win, true)
+      end
+    end
+    if vim.api.nvim_win_is_valid(initial_win) then
+      vim.api.nvim_set_current_win(initial_win)
+    end
+    assert.is_true(ok, err)
+  end)
+
+  it("reclaims window ownership when cycling back to a reused API session", function()
+    local initial_win = vim.api.nvim_get_current_win()
+    local adapter = {
+      name = "local",
+      type = "api",
+      config = { context_size = 32768 },
+    }
+
+    local ok, err = pcall(function()
+      session.create(adapter, "First API", { data_dir = vim.fn.tempname(), winbar = "" })
+      session.create(adapter, "Second API", { data_dir = vim.fn.tempname(), winbar = "" })
+      local first, second
+      for _, s in ipairs(session._all()) do
+        if s.title == "First API" then first = s end
+        if s.title == "Second API" then second = s end
+      end
+
+      local reused_win = second.winid
+      session.cycle("prev", { winbar = "" })
+
+      assert.equals(first, session._current())
+      assert.equals(reused_win, first.winid)
+      assert.is_nil(second.winid)
+      assert.equals(first.bufnr, vim.api.nvim_win_get_buf(reused_win))
+    end)
+
+    for _, s in ipairs(session._all()) do
+      if s.bufnr and vim.api.nvim_buf_is_valid(s.bufnr) then
+        pcall(vim.api.nvim_buf_delete, s.bufnr, { force = true })
+      end
+    end
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      if win ~= initial_win and vim.api.nvim_win_is_valid(win) then
+        pcall(vim.api.nvim_win_close, win, true)
+      end
+    end
+    if vim.api.nvim_win_is_valid(initial_win) then
+      vim.api.nvim_set_current_win(initial_win)
+    end
+    assert.is_true(ok, err)
+  end)
+
+  it("reclaims window ownership when resuming an in-memory API session", function()
+    local initial_win = vim.api.nvim_get_current_win()
+    local adapter = {
+      name = "local",
+      type = "api",
+      config = { context_size = 32768 },
+    }
+
+    local ok, err = pcall(function()
+      session.create(adapter, "First API", { data_dir = vim.fn.tempname(), winbar = "" })
+      session.create(adapter, "Second API", { data_dir = vim.fn.tempname(), winbar = "" })
+      local first, second
+      for _, s in ipairs(session._all()) do
+        if s.title == "First API" then first = s end
+        if s.title == "Second API" then second = s end
+      end
+
+      local reused_win = second.winid
+      session.resume_api(adapter, { id = first.id, title = first.title, cwd = first.cwd }, { data_dir = vim.fn.tempname(), winbar = "" })
+
+      assert.equals(first, session._current())
+      assert.equals(reused_win, first.winid)
+      assert.is_nil(second.winid)
+      assert.equals(first.bufnr, vim.api.nvim_win_get_buf(reused_win))
+    end)
+
+    for _, s in ipairs(session._all()) do
+      if s.bufnr and vim.api.nvim_buf_is_valid(s.bufnr) then
+        pcall(vim.api.nvim_buf_delete, s.bufnr, { force = true })
+      end
+    end
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      if win ~= initial_win and vim.api.nvim_win_is_valid(win) then
+        pcall(vim.api.nvim_win_close, win, true)
+      end
+    end
+    if vim.api.nvim_win_is_valid(initial_win) then
+      vim.api.nvim_set_current_win(initial_win)
+    end
+    assert.is_true(ok, err)
+  end)
+
+  it("claims the window for the remaining session after closing a reclaimed API session", function()
+    local initial_win = vim.api.nvim_get_current_win()
+    local adapter = {
+      name = "local",
+      type = "api",
+      config = { context_size = 32768 },
+    }
+
+    local ok, err = pcall(function()
+      session.create(adapter, "First API", { data_dir = vim.fn.tempname(), winbar = "" })
+      session.create(adapter, "Second API", { data_dir = vim.fn.tempname(), winbar = "" })
+      local first, second
+      for _, s in ipairs(session._all()) do
+        if s.title == "First API" then first = s end
+        if s.title == "Second API" then second = s end
+      end
+
+      local reused_win = second.winid
+      assert.is_true(session._show_session_in_window(first, reused_win))
+      session.close({ data_dir = vim.fn.tempname(), winbar = "" })
+
+      assert.is_nil(session._get(first.id))
+      assert.equals(second, session._current())
+      assert.equals(reused_win, second.winid)
+      assert.is_true(vim.api.nvim_win_is_valid(second.winid))
+      assert.equals(second.bufnr, vim.api.nvim_win_get_buf(second.winid))
+    end)
+
+    for _, s in ipairs(session._all()) do
+      if s.bufnr and vim.api.nvim_buf_is_valid(s.bufnr) then
+        pcall(vim.api.nvim_buf_delete, s.bufnr, { force = true })
+      end
+    end
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      if win ~= initial_win and vim.api.nvim_win_is_valid(win) then
+        pcall(vim.api.nvim_win_close, win, true)
+      end
+    end
+    if vim.api.nvim_win_is_valid(initial_win) then
+      vim.api.nvim_set_current_win(initial_win)
+    end
+    assert.is_true(ok, err)
+  end)
+
+  it("does not reuse a stale session winid that no longer shows its buffer", function()
+    local initial_win = vim.api.nvim_get_current_win()
+    local initial_windows = #vim.api.nvim_list_wins()
+    local adapter = {
+      name = "local",
+      type = "api",
+      config = { context_size = 32768 },
+    }
+
+    local ok, err = pcall(function()
+      session.create(adapter, "First API", { data_dir = vim.fn.tempname(), winbar = "" })
+      local first = session._current()
+      local stale_win = first.winid
+      local scratch = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_win_set_buf(stale_win, scratch)
+      vim.api.nvim_set_current_win(stale_win)
+
+      session.create(adapter, "Second API", { data_dir = vim.fn.tempname(), winbar = "" })
+      local second = session._current()
+
+      assert.is_nil(first.winid)
+      assert.not_equals(stale_win, second.winid)
+      assert.equals(initial_windows + 2, #vim.api.nvim_list_wins())
+      assert.equals(scratch, vim.api.nvim_win_get_buf(stale_win))
+      assert.equals(second.bufnr, vim.api.nvim_win_get_buf(second.winid))
+    end)
+
+    for _, s in ipairs(session._all()) do
+      if s.bufnr and vim.api.nvim_buf_is_valid(s.bufnr) then
+        pcall(vim.api.nvim_buf_delete, s.bufnr, { force = true })
+      end
+    end
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      if win ~= initial_win and vim.api.nvim_win_is_valid(win) then
+        pcall(vim.api.nvim_win_close, win, true)
+      end
+    end
+    if vim.api.nvim_win_is_valid(initial_win) then
+      vim.api.nvim_set_current_win(initial_win)
+    end
+    assert.is_true(ok, err)
+  end)
+
+  it("makes a newly opened terminal session current", function()
+    local initial_win = vim.api.nvim_get_current_win()
+    local old_termopen = vim.fn.termopen
+    vim.fn.termopen = function()
+      return 9002
+    end
+
+    local ok, err = pcall(function()
+      local previous = session._new_record("mockcli", "Previous CLI")
+      previous.bufnr = vim.api.nvim_get_current_buf()
+      previous.winid = initial_win
+      session._add(previous)
+      assert.is_true(session._show_session_in_window(previous, initial_win))
+
+      local resumed = session._new_record("mockcli", "Resume")
+      session._add(resumed)
+      session._claim_window_for(resumed, initial_win)
+      session._open_terminal(resumed, { "mockcli" }, initial_win, { winbar = "" })
+
+      assert.equals(resumed, session._current())
+      assert.equals(initial_win, resumed.winid)
+      assert.is_nil(previous.winid)
+    end)
+
+    vim.fn.termopen = old_termopen
+    for _, s in ipairs(session._all()) do
+      if s.bufnr and vim.api.nvim_buf_is_valid(s.bufnr) then
+        pcall(vim.api.nvim_buf_delete, s.bufnr, { force = true })
+      end
+    end
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      if win ~= initial_win and vim.api.nvim_win_is_valid(win) then
+        pcall(vim.api.nvim_win_close, win, true)
+      end
+    end
+    if vim.api.nvim_win_is_valid(initial_win) then
+      vim.api.nvim_set_current_win(initial_win)
+    end
+    assert.is_true(ok, err)
+  end)
+
   it("generates unique ids", function()
     local a = session._new_record("claude", "A")
     local b = session._new_record("claude", "B")
