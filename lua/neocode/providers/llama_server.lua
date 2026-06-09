@@ -28,6 +28,17 @@ local function read_url_json(url)
   return nil
 end
 
+local function props_thinking_available(props)
+  if type(props) ~= "table" then return nil end
+  if type(props.thinking_available) == "boolean" then return props.thinking_available end
+  local caps = props.chat_template_caps
+  if type(caps) == "table" then
+    if type(caps.supports_thinking) == "boolean" then return caps.supports_thinking end
+    if type(caps.supports_enable_thinking) == "boolean" then return caps.supports_enable_thinking end
+  end
+  return nil
+end
+
 function M.metadata_from_responses(props, models, opts)
   opts = opts or {}
   local base = openai.metadata_from_models(models, {
@@ -42,6 +53,10 @@ function M.metadata_from_responses(props, models, opts)
     or tonumber(meta.n_ctx)
     or tonumber(meta.n_ctx_train)
     or base.context_size
+  local thinking_available = props_thinking_available(props)
+  if thinking_available == nil and type(base.thinking_available) == "boolean" then
+    thinking_available = base.thinking_available
+  end
 
   return {
     provider = "llama-server",
@@ -53,6 +68,7 @@ function M.metadata_from_responses(props, models, opts)
       or tonumber(type(props) == "table" and props.n_ctx)
       or tonumber(meta.n_ctx)
       or tonumber(meta.n_ctx_train)),
+    thinking_available = thinking_available == true,
   }
 end
 

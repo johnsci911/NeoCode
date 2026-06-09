@@ -21,6 +21,41 @@ describe("llama-server provider", function()
     assert.is_false(metadata.estimated_context_size)
   end)
 
+  it("detects thinking support from llama-server chat template caps", function()
+    local metadata = provider.metadata_from_responses({
+      model_alias = "template-model",
+      chat_template_caps = { supports_thinking = true },
+    }, {
+      data = {
+        { id = "fallback-model" },
+      },
+    })
+
+    assert.is_true(metadata.thinking_available)
+  end)
+
+  it("does not infer thinking support from model names", function()
+    local metadata = provider.metadata_from_responses({
+      model_alias = "qwen3-thinking-looking-name",
+    }, {
+      data = {
+        { id = "deepseek-r1-looking-name" },
+      },
+    })
+
+    assert.is_false(metadata.thinking_available)
+  end)
+
+  it("preserves explicit OpenAI-compatible reasoning capabilities through llama-server metadata", function()
+    local metadata = provider.metadata_from_responses(nil, {
+      data = {
+        { id = "routed-model", capabilities = { "completion", "reasoning" } },
+      },
+    })
+
+    assert.is_true(metadata.thinking_available)
+  end)
+
   it("builds llama-server probe URLs from a v1 base URL", function()
     local configured = provider.setup({ base_url = "http://127.0.0.1:8080/v1" })
 

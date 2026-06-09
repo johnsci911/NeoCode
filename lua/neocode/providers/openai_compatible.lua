@@ -38,6 +38,22 @@ local function read_url_json(url)
   return nil
 end
 
+local function metadata_indicates_thinking(model_info)
+  if type(model_info) ~= "table" then return false end
+  local meta = model_info.meta or {}
+  local capabilities = model_info.capabilities or meta.capabilities
+  if type(capabilities) == "table" then
+    for _, capability in ipairs(capabilities) do
+      local value = tostring(capability or ""):lower()
+      if value == "reasoning" or value == "thinking" then return true end
+    end
+  end
+  for _, key in ipairs({ "thinking", "reasoning", "supports_thinking", "supports_reasoning" }) do
+    if model_info[key] == true or meta[key] == true then return true end
+  end
+  return false
+end
+
 function M.metadata_from_models(models, opts)
   opts = opts or {}
   local model_info = first_model(models) or {}
@@ -56,6 +72,7 @@ function M.metadata_from_models(models, opts)
     context_size = context_size,
     training_context_size = tonumber(meta.n_ctx_train or meta.training_context_length),
     estimated_context_size = estimated,
+    thinking_available = metadata_indicates_thinking(model_info),
   }
 end
 

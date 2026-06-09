@@ -37,6 +37,36 @@ describe("openai compatible provider", function()
     assert.is_true(metadata.estimated_context_size)
   end)
 
+  it("detects thinking support from explicit model capabilities", function()
+    local metadata = provider.metadata_from_models({
+      data = {
+        { id = "explicit-reasoning-model", capabilities = { "completion", "reasoning" } },
+      },
+    })
+
+    assert.is_true(metadata.thinking_available)
+  end)
+
+  it("detects thinking support from explicit model metadata flags", function()
+    local metadata = provider.metadata_from_models({
+      data = {
+        { id = "explicit-metadata-model", meta = { supports_thinking = true } },
+      },
+    })
+
+    assert.is_true(metadata.thinking_available)
+  end)
+
+  it("does not infer thinking support from model names", function()
+    local metadata = provider.metadata_from_models({
+      data = {
+        { id = "deepseek-r1-thinking-looking-name" },
+      },
+    })
+
+    assert.is_false(metadata.thinking_available)
+  end)
+
   it("probes model metadata from the OpenAI models endpoint", function()
     local seen_url = nil
     local configured = provider.setup({
