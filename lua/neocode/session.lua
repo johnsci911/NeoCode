@@ -1346,8 +1346,8 @@ function M._register_api_keymaps(buf, record, config)
   vim.keymap.set("n", "H", function() M.toggle(config) end, opts)
   vim.keymap.set("n", "R", function() M.rename_current(config) end, opts)
 
-  -- <C-h> opens session history picker
-  vim.keymap.set("n", "<C-h>", function()
+  -- <C-S-h> opens session history picker
+  vim.keymap.set("n", "<C-S-h>", function()
     require("neocode.history").pick(config)
   end, opts)
 
@@ -2351,8 +2351,8 @@ function M._register_buf_keymaps(buf, record, config)
 
   vim.keymap.set("n", "R", function() M.rename_current(config) end, opts)
 
-  -- <C-h> opens the adapter's native session picker (e.g. claude --resume)
-  vim.keymap.set("n", "<C-h>", function()
+  -- <C-S-h> opens the adapter's native session picker (e.g. claude --resume)
+  vim.keymap.set("n", "<C-S-h>", function()
     local adapter = config.adapters and config.adapters[record.adapter]
     if not adapter or not adapter.resume_cmd then
       vim.notify("neocode: adapter does not support resume", vim.log.levels.WARN)

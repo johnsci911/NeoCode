@@ -7,7 +7,7 @@ local KEYMAP_LINES = {
   "  NeoCode",
   " ──────────────────────────────────────",
   "  <leader>aiC   New session / launcher",
-  "  <C-h>         Resume session (native picker)",
+  "  <C-S-h>       Resume session (native picker)",
   "  i             Insert in inline draft / input window",
   "  <C-s>/<C-CR>/<M-CR> Send inline draft",
   "  <C-p>         Paste image",
