@@ -43,6 +43,11 @@ function M.open(session, config)
       vim.api.nvim_win_close(win, true)
       return
     end
+    if text:match("^%s*/session%s*$") then
+      vim.api.nvim_win_close(win, true)
+      require("neocode.history").pick(config)
+      return
+    end
     if not session.job_id then
       vim.notify("neocode: session has no active job (job_id is nil)", vim.log.levels.ERROR)
       return

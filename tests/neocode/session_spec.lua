@@ -175,6 +175,25 @@ describe("session", function()
   end)
 
   describe("local memory and skill commands", function()
+    it("opens session history for /session", function()
+      local picked_config = nil
+      local old_history = package.loaded["neocode.history"]
+      package.loaded["neocode.history"] = {
+        pick = function(config)
+          picked_config = config
+        end,
+      }
+      local config = { data_dir = vim.fn.tempname() }
+
+      local ok, err = pcall(function()
+        assert.is_true(session._handle_local_command("/session", {}, config))
+      end)
+
+      package.loaded["neocode.history"] = old_history
+      assert.is_true(ok, err)
+      assert.equals(config, picked_config)
+    end)
+
     it("handles /thinking through the active API adapter", function()
       local notified = {}
       local old_notify = vim.notify
@@ -1170,6 +1189,36 @@ describe("session", function()
     local s = session._new_record("claude", "Old")
     session._rename_record(s, "New")
     assert.equals("New", s.title)
+  end)
+
+  it("does not register a resume keymap for API sessions", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    local record = { bufnr = buf }
+
+    session._register_api_keymaps(buf, record, {})
+
+    local maps = vim.api.nvim_buf_get_keymap(buf, "n")
+    vim.api.nvim_buf_delete(buf, { force = true })
+    for _, map in ipairs(maps) do
+      assert.not_equals("<C-S-h>", map.lhs)
+      assert.not_equals("<C-h>", map.lhs)
+      assert.not_equals("h", map.lhs)
+    end
+  end)
+
+  it("does not register a resume keymap for CLI sessions", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    local record = { adapter = "mockcli" }
+
+    session._register_buf_keymaps(buf, record, { adapters = {} })
+
+    local maps = vim.api.nvim_buf_get_keymap(buf, "n")
+    vim.api.nvim_buf_delete(buf, { force = true })
+    for _, map in ipairs(maps) do
+      assert.not_equals("<C-S-h>", map.lhs)
+      assert.not_equals("<C-h>", map.lhs)
+      assert.not_equals("h", map.lhs)
+    end
   end)
 
   it("strips transient web-search system context from saved API messages", function()

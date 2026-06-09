@@ -36,4 +36,43 @@ describe("input popup", function()
 
     assert.is_false(vim.api.nvim_win_is_valid(win))
   end)
+
+  it("opens session history for /session instead of sending to the CLI", function()
+    local old_history = package.loaded["neocode.history"]
+    local old_chansend = vim.fn.chansend
+    local picked_config = nil
+    local sent = false
+    package.loaded["neocode.history"] = {
+      pick = function(config)
+        picked_config = config
+      end,
+    }
+    vim.fn.chansend = function()
+      sent = true
+    end
+    local session_record = {
+      job_id = 42,
+      bufnr = vim.api.nvim_create_buf(false, true),
+    }
+    local config = { data_dir = vim.fn.tempname() }
+
+    local ok, err = pcall(function()
+      input.open(session_record, config)
+      local buf = vim.api.nvim_get_current_buf()
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "/session" })
+      local send_map = vim.fn.maparg("<C-s>", "n", false, true)
+      assert.equals(1, send_map.buffer)
+      assert.is_function(send_map.callback)
+      send_map.callback()
+      assert.equals(config, picked_config)
+      assert.is_false(sent)
+    end)
+
+    package.loaded["neocode.history"] = old_history
+    vim.fn.chansend = old_chansend
+    if session_record.bufnr and vim.api.nvim_buf_is_valid(session_record.bufnr) then
+      vim.api.nvim_buf_delete(session_record.bufnr, { force = true })
+    end
+    assert.is_true(ok, err)
+  end)
 end)

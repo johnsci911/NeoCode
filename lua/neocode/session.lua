@@ -316,6 +316,11 @@ function M._build_skills_context(config)
 end
 
 function M._handle_local_command(text, record, config)
+  if text:match("^%s*/session%s*$") then
+    require("neocode.history").pick(config)
+    return true
+  end
+
   local thinking_command = text:match("^%s*/thinking%s*(.-)%s*$")
   if thinking_command then
     local thinking_mode = thinking_command ~= "" and thinking_command or nil
@@ -1346,11 +1351,6 @@ function M._register_api_keymaps(buf, record, config)
   vim.keymap.set("n", "H", function() M.toggle(config) end, opts)
   vim.keymap.set("n", "R", function() M.rename_current(config) end, opts)
 
-  -- <C-S-h> opens session history picker
-  vim.keymap.set("n", "<C-S-h>", function()
-    require("neocode.history").pick(config)
-  end, opts)
-
   -- Q closes the session
   vim.keymap.set("n", "Q", function() M.close(config) end, opts)
 end
@@ -2350,23 +2350,6 @@ function M._register_buf_keymaps(buf, record, config)
   end, opts)
 
   vim.keymap.set("n", "R", function() M.rename_current(config) end, opts)
-
-  -- <C-S-h> opens the adapter's native session picker (e.g. claude --resume)
-  vim.keymap.set("n", "<C-S-h>", function()
-    local adapter = config.adapters and config.adapters[record.adapter]
-    if not adapter or not adapter.resume_cmd then
-      vim.notify("neocode: adapter does not support resume", vim.log.levels.WARN)
-      return
-    end
-    local spec       = adapter.resume_cmd({ cwd = vim.fn.getcwd() })
-    local new_record = M._new_record(record.adapter, "Resume")
-    M._add(new_record)
-    local win      = vim.api.nvim_get_current_win()
-    local prev_buf = vim.api.nvim_get_current_buf()
-    local argv     = vim.list_extend({ spec.cmd }, spec.args or {})
-    claim_window_for(new_record, win)
-    M._open_terminal(new_record, argv, win, config, { prev_buf = prev_buf })
-  end, opts)
 
   -- H hides the NeoCode window
   vim.keymap.set("n", "H", function() M.toggle(config) end, opts)
