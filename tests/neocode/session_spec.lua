@@ -222,17 +222,23 @@ describe("session", function()
       assert.equals("neocode: Thinking mode not available", notified[1].message)
     end)
 
-    it("handles /thinking without arguments as adapter usage", function()
+    it("handles /thinking without arguments as an interactive picker", function()
       local notified = {}
       local old_notify = vim.notify
+      local old_select = vim.ui.select
       vim.notify = function(message, level)
         table.insert(notified, { message = message, level = level })
+      end
+      vim.ui.select = function(items, opts, cb)
+        assert.are.same({ "off", "low", "medium", "high", "max" }, items)
+        assert.equals("NeoCode thinking mode", opts.prompt)
+        cb("medium")
       end
       local record = {
         api_adapter = {
           set_thinking = function(mode)
-            assert.is_nil(mode)
-            return false, "usage: /thinking off|low|medium|high|max"
+            assert.equals("medium", mode)
+            return true, "thinking mode: medium (enabled for next request; confirmed by slots reasoning_format=deepseek)"
           end,
         },
       }
@@ -242,8 +248,9 @@ describe("session", function()
       end)
 
       vim.notify = old_notify
+      vim.ui.select = old_select
       assert.is_true(ok, err)
-      assert.equals("neocode: usage: /thinking off|low|medium|high|max", notified[1].message)
+      assert.equals("neocode: thinking mode: medium (enabled for next request; confirmed by slots reasoning_format=deepseek)", notified[1].message)
     end)
 
     it("handles /memory save without writing to the project tree", function()

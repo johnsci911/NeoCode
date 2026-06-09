@@ -255,6 +255,16 @@ function M._handle_local_command(text, record, config)
     local thinking_mode = thinking_command ~= "" and thinking_command or nil
     local adapter = record and record.api_adapter
     if adapter and type(adapter.set_thinking) == "function" then
+      if not thinking_mode then
+        vim.ui.select({ "off", "low", "medium", "high", "max" }, {
+          prompt = "NeoCode thinking mode",
+        }, function(choice)
+          if not choice then return end
+          local ok, message = adapter.set_thinking(choice)
+          vim.notify("neocode: " .. tostring(message or (ok and "thinking mode updated" or "Thinking mode not available")), ok and vim.log.levels.INFO or vim.log.levels.WARN)
+        end)
+        return true
+      end
       local ok, message = adapter.set_thinking(thinking_mode)
       vim.notify("neocode: " .. tostring(message or (ok and "thinking mode updated" or "Thinking mode not available")), ok and vim.log.levels.INFO or vim.log.levels.WARN)
     else
@@ -1747,6 +1757,9 @@ function M._open_api_input(record, config, opts)
           content = response_text,
           _stats = stats,
         })
+        if stats and stats.thinking_confirmed then
+          vim.notify("neocode: thinking confirmed in model response", vim.log.levels.INFO)
+        end
 
         M._strip_image_payloads_from_messages(record.messages)
 
