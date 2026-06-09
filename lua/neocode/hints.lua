@@ -19,7 +19,7 @@ local KEYMAP_LINES = {
   "  ?             Toggle this overlay",
   " ──────────────────────────────────────",
   "  /compact      Summarize API conversation",
-  "  /thinking MODE off|low|medium|high|max",
+  "  /thinking [MODE] select off|low|medium|high|max",
   "  /rename NAME  Rename current session",
   "  /readfile PATH Read exact local file",
   "  /websearch Q  Search web explicitly",

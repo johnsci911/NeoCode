@@ -332,7 +332,7 @@ Memory and selected skills are injected as system context for NeoCode-managed AP
 | Command | Action |
 |---------|--------|
 | `/compact` | Summarize NeoCode-managed API conversations to free context |
-| `/thinking off\|low\|medium\|high\|max` | Toggle llama.cpp thinking controls for the shared local adapter when the active server reports support |
+| `/thinking [off\|low\|medium\|high\|max]` | Open an interactive thinking selector, or set llama.cpp thinking controls directly when the active server reports support |
 | `/rename <title>` | Rename current session |
 | `/readfile <path>` | Read an exact local file without web search |
 | `/websearch <query>` | Force web search for current/external information |
