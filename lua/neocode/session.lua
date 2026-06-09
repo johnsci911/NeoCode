@@ -297,6 +297,13 @@ function M._handle_local_command(text, record, config)
   return false
 end
 
+function M._api_input_text_from_lines(lines)
+  lines = vim.deepcopy(lines or {})
+  if lines[1] == "Me:" then table.remove(lines, 1) end
+  local text = table.concat(lines, "\n")
+  return text:gsub("^\n+", ""):gsub("%s+$", "")
+end
+
 local function strip_path_token(path)
   return (path or "")
     :gsub("^[`'\"]+", "")
@@ -1384,11 +1391,13 @@ function M._open_api_input(record, config)
 
   vim.wo[win].wrap      = true
   vim.wo[win].linebreak = true
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "Me:", "" })
+  vim.api.nvim_win_set_cursor(win, { 2, 0 })
   vim.cmd("startinsert")
 
   local function send_and_close()
     local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-    local text  = table.concat(lines, "\n")
+    local text = M._api_input_text_from_lines(lines)
     if text == "" then
       vim.api.nvim_win_close(win, true)
       return

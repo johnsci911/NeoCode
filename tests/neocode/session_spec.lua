@@ -276,6 +276,17 @@ describe("session", function()
     end)
   end)
 
+  describe("api input composer", function()
+    it("strips the visible Me prompt marker before sending", function()
+      assert.equals("hello", session._api_input_text_from_lines({ "Me:", "hello" }))
+      assert.equals("multi\nline", session._api_input_text_from_lines({ "Me:", "", "multi", "line", "" }))
+    end)
+
+    it("treats a prompt-only input window as empty", function()
+      assert.equals("", session._api_input_text_from_lines({ "Me:", "" }))
+    end)
+  end)
+
   describe("_extract_direct_read_path", function()
     it("extracts an explicit absolute file path from read prompts", function()
       assert.equals(
