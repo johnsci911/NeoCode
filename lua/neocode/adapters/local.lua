@@ -380,14 +380,30 @@ end
 local function default_transport(messages, extra, callback)
   ensure_setup()
   local payload = vim.fn.json_encode(request_payload(messages, extra))
+  local payload_path = vim.fn.tempname()
+  local payload_file = io.open(payload_path, "w")
+  if not payload_file then
+    callback({ error = { message = "could not write request payload" } })
+    return nil
+  end
+  payload_file:write(payload)
+  payload_file:close()
   local url = M.provider:chat_completions_url()
   local stdout = {}
   local stderr = {}
   local completed = false
 
+  local function cleanup_payload()
+    if payload_path then
+      pcall(vim.fn.delete, payload_path)
+      payload_path = nil
+    end
+  end
+
   local function complete(result)
     if completed then return end
     completed = true
+    cleanup_payload()
     callback(result)
   end
 
@@ -395,7 +411,7 @@ local function default_transport(messages, extra, callback)
     "curl", "--silent", "--show-error", "--fail-with-body",
     "-X", "POST",
     "-H", "Content-Type: application/json",
-    "-d", payload,
+    "--data-binary", "@" .. payload_path,
     "--", url,
   }, {
     stdout_buffered = true,

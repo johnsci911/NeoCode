@@ -250,6 +250,32 @@ describe("local adapter", function()
     assert.equals("neocode__read_file", payload.tools[1]["function"].name)
   end)
 
+  it("does not pass large image payloads through curl argv", function()
+    local_adapter.setup({ model = "local-model", read_json = no_metadata_read })
+    local original_jobstart = vim.fn.jobstart
+    local captured_argv = nil
+    vim.fn.jobstart = function(argv, opts)
+      captured_argv = argv
+      if opts and opts.on_stdout then opts.on_stdout(77, { '{"choices":[{"message":{"content":"ok"}}]}' }) end
+      if opts and opts.on_exit then opts.on_exit(77, 0) end
+      return 77
+    end
+
+    local large_image = string.rep("a", 200000)
+    local ok, err = pcall(function()
+      local_adapter.stream({
+        local_adapter._build_user_message("look <image0>", { large_image }),
+      }, nil, function() end)
+    end)
+    vim.fn.jobstart = original_jobstart
+
+    assert.is_true(ok, err)
+    assert.is_table(captured_argv)
+    for _, arg in ipairs(captured_argv) do
+      assert.is_true(#tostring(arg) < 10000)
+    end
+  end)
+
   it("sanitizes corrupted assistant history before building request payloads", function()
     local_adapter.setup({ model = "local-model", read_json = no_metadata_read })
 
