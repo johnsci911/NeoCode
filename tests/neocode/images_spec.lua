@@ -21,7 +21,7 @@ describe("images", function()
     assert.equals(0, vim.fn.isdirectory(dir))
   end)
 
-  it("paste() deletes the previous pending temp image before saving a new one", function()
+  it("paste() appends pasted images as ordered pending temp images", function()
     local dir = "/tmp/neocode_test_images/session_replace"
     vim.fn.mkdir(dir, "p")
     local old_path = dir .. "/old.png"
@@ -39,18 +39,19 @@ describe("images", function()
         attached = path
       end,
     }
-    local session = { id = "session_replace", pending_image = old_path }
+    local session = { id = "session_replace", pending_images = { old_path } }
 
     local ok, err = pcall(function()
       images.paste(adapter, session, { data_dir = "/tmp/neocode_test_images" })
     end)
 
     images.save_clipboard = original_save_clipboard
-    vim.fn.delete(dir, "rf")
 
     assert.is_true(ok, err)
-    assert.equals(0, vim.fn.filereadable(old_path))
+    assert.equals(1, vim.fn.filereadable(old_path))
     assert.equals(new_path, attached)
+    assert.same({ old_path, new_path }, session.pending_images)
     assert.equals(new_path, session.pending_image)
+    vim.fn.delete(dir, "rf")
   end)
 end)

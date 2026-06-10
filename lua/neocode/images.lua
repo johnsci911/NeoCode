@@ -86,16 +86,11 @@ function M.cleanup_stale(data_dir, live_session_ids)
 end
 
 -- Paste image from clipboard into the current session.
--- Stores path on session.pending_image; deleted on session close.
+-- Stores paths on session.pending_images; deleted on session close.
 function M.paste(adapter, session, config)
   if not session then
     vim.notify("neocode: no active session", vim.log.levels.WARN)
     return
-  end
-
-  if session.pending_image then
-    M.delete_temp(session.pending_image)
-    session.pending_image = nil
   end
 
   local path, err = M.save_clipboard(config.data_dir .. "/images", session.id)
@@ -105,6 +100,8 @@ function M.paste(adapter, session, config)
   end
 
   adapter.attach_image(session, path)
+  session.pending_images = session.pending_images or {}
+  table.insert(session.pending_images, path)
   session.pending_image = path
 end
 
