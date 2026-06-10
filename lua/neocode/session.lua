@@ -2166,6 +2166,9 @@ function M._paste_image_api(record, config)
   record.pending_image_b64 = nil
 
   images.delete_temp(path)
+  if record.bufnr and vim.api.nvim_get_current_buf() == record.bufnr then
+    M._insert_image_placeholder(record.bufnr, image_index)
+  end
 
   vim.notify("neocode: image " .. tostring(image_index) .. " attached - type your message with 'i'", vim.log.levels.INFO)
 end

@@ -1402,6 +1402,54 @@ describe("session", function()
     assert.is_true(ok, err)
     assert.same({ "Me:", "Compare these <image0>" }, lines)
   end)
+
+  it("normal-mode API paste inserts a numbered placeholder into the inline draft", function()
+    local images = require("neocode.images")
+    local old_save_clipboard = images.save_clipboard
+    local old_delete_temp = images.delete_temp
+    local tmp = vim.fn.tempname()
+    vim.fn.mkdir(tmp, "p")
+    local image_path = tmp .. "/pasted.png"
+    vim.fn.writefile({ "fake image bytes" }, image_path)
+    images.save_clipboard = function()
+      return image_path, nil
+    end
+    images.delete_temp = function() end
+
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "Me:", "" })
+    local win = vim.api.nvim_open_win(buf, true, {
+      relative = "editor",
+      row = 1,
+      col = 1,
+      width = 40,
+      height = 5,
+      style = "minimal",
+    })
+    vim.api.nvim_win_set_cursor(win, { 2, 0 })
+    local record = {
+      id = "normal-paste-placeholder",
+      bufnr = buf,
+      pending_images_b64 = {},
+    }
+
+    local ok, err = pcall(function()
+      session._paste_image_api(record, { data_dir = tmp })
+    end)
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+
+    images.save_clipboard = old_save_clipboard
+    images.delete_temp = old_delete_temp
+    vim.api.nvim_win_close(win, true)
+    if vim.api.nvim_buf_is_valid(buf) then
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end
+    vim.fn.delete(tmp, "rf")
+
+    assert.is_true(ok, err)
+    assert.equals(1, #record.pending_images_b64)
+    assert.same({ "Me:", "<image0>" }, lines)
+  end)
 end)
 
 describe("session persistence", function()
