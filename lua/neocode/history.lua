@@ -129,7 +129,7 @@ function M.pick(config)
       end)
 
       -- d: delete session(s) - supports multi-select with <Tab>
-      map("n", "d", function()
+      local function delete_selection()
         local picker = action_state.get_current_picker(prompt_bufnr)
         local selections = picker:get_multi_selection()
 
@@ -162,7 +162,9 @@ function M.pick(config)
           vim.notify("neocode: deleted " .. deleted .. " session(s)", vim.log.levels.INFO)
         end
         refresh_picker(prompt_bufnr)
-      end)
+      end
+      map("n", "d", delete_selection)
+      map("i", "d", delete_selection)
 
       -- r: rename session
       map("n", "r", function()

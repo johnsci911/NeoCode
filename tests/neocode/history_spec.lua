@@ -28,4 +28,49 @@ describe("history picker entries", function()
 
     assert.equals(0, #entries)
   end)
+
+  it("maps delete in both normal and insert mode for the telescope picker", function()
+    local old_modules = {
+      pickers = package.loaded["telescope.pickers"],
+      finders = package.loaded["telescope.finders"],
+      config = package.loaded["telescope.config"],
+      actions = package.loaded["telescope.actions"],
+      action_state = package.loaded["telescope.actions.state"],
+    }
+    local mapped = {}
+    package.loaded["telescope.finders"] = { new_table = function(opts) return opts end }
+    package.loaded["telescope.config"] = { values = { generic_sorter = function() return function() end end } }
+    package.loaded["telescope.actions"] = {
+      close = function() end,
+      select_default = { replace = function() end },
+    }
+    package.loaded["telescope.actions.state"] = {
+      get_current_picker = function()
+        return { get_multi_selection = function() return {} end }
+      end,
+      get_selected_entry = function() return nil end,
+    }
+    package.loaded["telescope.pickers"] = {
+      new = function(_, opts)
+        opts.attach_mappings(1, function(mode, lhs, _rhs)
+          mapped[mode .. lhs] = true
+        end)
+        return { find = function() end }
+      end,
+    }
+
+    local ok, err = pcall(function()
+      history.pick({ data_dir = vim.fn.tempname(), adapters = {} })
+    end)
+
+    package.loaded["telescope.pickers"] = old_modules.pickers
+    package.loaded["telescope.finders"] = old_modules.finders
+    package.loaded["telescope.config"] = old_modules.config
+    package.loaded["telescope.actions"] = old_modules.actions
+    package.loaded["telescope.actions.state"] = old_modules.action_state
+
+    assert.is_true(ok, err)
+    assert.is_true(mapped["nd"])
+    assert.is_true(mapped["id"])
+  end)
 end)
