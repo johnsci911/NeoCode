@@ -29,6 +29,7 @@ function M._new_record(adapter_name, title)
     winid         = nil,
     job_id        = nil,
     pending_image = nil,
+    pending_images = {},
   }
 end
 
@@ -398,6 +399,34 @@ function M._api_input_lines_from_text(text)
     table.insert(lines, line)
   end
   return lines
+end
+
+local function pending_api_images(record)
+  if not record then return {} end
+  if type(record.pending_images_b64) == "table" then return record.pending_images_b64 end
+  if record.pending_image_b64 and record.pending_image_b64 ~= "" then
+    record.pending_images_b64 = { record.pending_image_b64 }
+    record.pending_image_b64 = nil
+    return record.pending_images_b64
+  end
+  record.pending_images_b64 = {}
+  return record.pending_images_b64
+end
+
+function M._insert_image_placeholder(buf, index)
+  if not buf or not vim.api.nvim_buf_is_valid(buf) then return false end
+  local win = vim.api.nvim_get_current_win()
+  local row, col = unpack(vim.api.nvim_win_get_cursor(win))
+  local placeholder = "<image" .. tostring(index) .. ">"
+  local line = vim.api.nvim_buf_get_lines(buf, row - 1, row, false)[1] or ""
+  local prefix = col > 0 and line:sub(1, col) or ""
+  local suffix = line:sub(col + 1)
+  local needs_leading_space = prefix ~= "" and not prefix:match("%s$")
+  local needs_trailing_space = suffix ~= "" and not suffix:match("^%s")
+  local text = (needs_leading_space and " " or "") .. placeholder .. (needs_trailing_space and " " or "")
+  vim.api.nvim_buf_set_text(buf, row - 1, col, row - 1, col, { text })
+  vim.api.nvim_win_set_cursor(win, { row, col + #text })
+  return true
 end
 
 function M._api_inline_draft_text_from_lines(lines)
@@ -1099,10 +1128,15 @@ function M._open_terminal(record, argv, win, config, opts)
 
   local job_id = vim.fn.termopen(argv, {
     on_exit = function()
+      local images = require("neocode.images")
+      for _, path in ipairs(record.pending_images or {}) do
+        images.delete_temp(path)
+      end
       if record.pending_image then
-        require("neocode.images").delete_temp(record.pending_image)
+        images.delete_temp(record.pending_image)
         record.pending_image = nil
       end
+      record.pending_images = {}
       record.status = "closed"
       record.bufnr  = nil
       record.winid  = nil
@@ -1166,6 +1200,7 @@ function M.create_api(adapter, title, config)
   record.messages = {}
   record.api_adapter = adapter
   record.pending_image_b64 = nil
+  record.pending_images_b64 = {}
   record.cwd = require("neocode.context").find_project_root()
   M._add(record)
 
@@ -1236,6 +1271,7 @@ function M.resume_api(adapter, session_data, config)
     messages      = {},
     api_adapter   = adapter,
     pending_image_b64 = nil,
+    pending_images_b64 = {},
     cwd           = session_data.cwd or require("neocode.context").find_project_root(),
   }
   M._add(record)
@@ -1325,7 +1361,7 @@ function M._register_api_keymaps(buf, record, config)
   vim.keymap.set({ "i", "n" }, "<C-CR>", send_inline_draft, opts)
   vim.keymap.set({ "i", "n" }, "<M-CR>", send_inline_draft, opts)
 
-  vim.keymap.set("n", "<C-v>", function()
+  vim.keymap.set("n", "<C-p>", function()
     M._paste_image_api(record, config)
   end, opts)
 
@@ -1518,8 +1554,8 @@ function M._open_api_input(record, config, opts)
   local col    = math.floor((vim.o.columns - width) / 2)
 
   local title = " NeoCode Input — <C-s>/<C-CR>/<M-CR> send · <C-p> paste image · <Esc> cancel "
-  if record.pending_image_b64 then
-    title = " NeoCode Input [image attached] — <C-s>/<C-CR>/<M-CR> send · <Esc> cancel "
+  if #pending_api_images(record) > 0 then
+    title = " NeoCode Input [" .. tostring(#pending_api_images(record)) .. " image(s) attached] — <C-s>/<C-CR>/<M-CR> send · <Esc> cancel "
   end
 
   local win = vim.api.nvim_open_win(buf, true, {
@@ -1618,8 +1654,9 @@ function M._open_api_input(record, config, opts)
 
       local is_first_user_message = not has_user_message(record.messages)
       M._strip_image_payloads_from_messages(record.messages)
-      local user_msg = llama._build_user_message(text, record.pending_image_b64)
+      local user_msg = llama._build_user_message(text, pending_api_images(record))
       record.pending_image_b64 = nil
+      record.pending_images_b64 = {}
       table.insert(record.messages, user_msg)
       M._append_transcript(config, record, user_msg)
 
@@ -2068,7 +2105,6 @@ function M._open_api_input(record, config, opts)
 
   local function paste_image()
     local images = require("neocode.images")
-    record.pending_image_b64 = nil
     local path, err = images.save_clipboard(config.data_dir .. "/images", record.id)
     if not path then
       vim.notify(err, vim.log.levels.ERROR)
@@ -2081,14 +2117,18 @@ function M._open_api_input(record, config, opts)
     end
     local data = f:read("*a")
     f:close()
-    record.pending_image_b64 = vim.base64.encode(data)
+    local pending = pending_api_images(record)
+    local image_index = #pending
+    table.insert(pending, vim.base64.encode(data))
+    record.pending_image_b64 = nil
     images.delete_temp(path)
+    M._insert_image_placeholder(buf, image_index)
     -- Update title to show image attached
     vim.api.nvim_win_set_config(win, {
-      title = " NeoCode Input [image attached] — <C-s>/<C-CR>/<M-CR> send · <Esc> cancel ",
+      title = " NeoCode Input [" .. tostring(#pending) .. " image(s) attached] — <C-s>/<C-CR>/<M-CR> send · <Esc> cancel ",
       title_pos = "center",
     })
-    vim.notify("neocode: image attached", vim.log.levels.INFO)
+    vim.notify("neocode: image " .. tostring(image_index) .. " attached", vim.log.levels.INFO)
   end
 
   local function cancel()
@@ -2105,9 +2145,6 @@ end
 
 function M._paste_image_api(record, config)
   local images = require("neocode.images")
-  if record then
-    record.pending_image_b64 = nil
-  end
   local path, err = images.save_clipboard(config.data_dir .. "/images", record.id)
   if not path then
     vim.notify(err, vim.log.levels.ERROR)
@@ -2123,11 +2160,14 @@ function M._paste_image_api(record, config)
   f:close()
 
   local b64 = vim.base64.encode(data)
-  record.pending_image_b64 = b64
+  local pending = pending_api_images(record)
+  local image_index = #pending
+  table.insert(pending, b64)
+  record.pending_image_b64 = nil
 
   images.delete_temp(path)
 
-  vim.notify("neocode: image attached - type your message with 'i'", vim.log.levels.INFO)
+  vim.notify("neocode: image " .. tostring(image_index) .. " attached - type your message with 'i'", vim.log.levels.INFO)
 end
 
 -- Cycle to next/prev session
@@ -2238,10 +2278,15 @@ function M.close(config)
   end
 
   -- Clean up pending images
+  local images = require("neocode.images")
+  for _, path in ipairs(s.pending_images or {}) do
+    images.delete_temp(path)
+  end
   if s.pending_image then
-    require("neocode.images").delete_temp(s.pending_image)
+    images.delete_temp(s.pending_image)
     s.pending_image = nil
   end
+  s.pending_images = {}
 
   -- Switch to another session before deleting the visible buffer; wiping the
   -- currently displayed buffer can close the window before ownership transfers.

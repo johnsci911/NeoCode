@@ -289,17 +289,28 @@ function M.setup(opts)
   return M
 end
 
-function M._build_user_message(text, image_b64)
-  if image_b64 and image_b64 ~= "" then
-    return {
-      role = "user",
-      content = {
-        { type = "text", text = text or "" },
-        {
+function M._build_user_message(text, images_b64)
+  local image_list = {}
+  if type(images_b64) == "table" then
+    image_list = images_b64
+  elseif images_b64 and images_b64 ~= "" then
+    image_list = { images_b64 }
+  end
+
+  if #image_list > 0 then
+    local content = { { type = "text", text = text or "" } }
+    for _, image_b64 in ipairs(image_list) do
+      if image_b64 and image_b64 ~= "" then
+        table.insert(content, {
           type = "image_url",
           image_url = { url = "data:image/png;base64," .. image_b64 },
-        },
-      },
+        })
+      end
+    end
+
+    return {
+      role = "user",
+      content = content,
     }
   end
 

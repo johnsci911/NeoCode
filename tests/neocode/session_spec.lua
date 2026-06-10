@@ -415,6 +415,49 @@ describe("session", function()
         "Press <C-s>, <C-CR>, or <M-CR> to send",
       }))
     end)
+
+    it("sends all pending API images once and clears them after send", function()
+      local tmp = vim.fn.tempname()
+      vim.fn.mkdir(tmp, "p")
+      local buf = vim.api.nvim_create_buf(false, true)
+      local local_adapter = require("neocode.adapters.local")
+      local_adapter.setup({ model = "local-model", read_json = function() return nil end })
+      local sent_messages = nil
+      local_adapter.stream = function(messages, _, on_complete)
+        sent_messages = vim.deepcopy(messages)
+        on_complete("ok", { usage = { prompt_tokens = 1, completion_tokens = 1, total_tokens = 2 } })
+        return 77
+      end
+      local record = {
+        id = "api-images-clear",
+        adapter = "local",
+        title = "API images clear",
+        created_at = 123,
+        bufnr = buf,
+        messages = {},
+        pending_images_b64 = { "abc123", "def456" },
+        api_adapter = local_adapter,
+        cwd = tmp,
+      }
+
+      local ok, err = pcall(function()
+        session._open_api_input(record, { data_dir = tmp }, {
+          initial_lines = { "Me:", "compare <image0> and <image1>" },
+          auto_send = true,
+        })
+      end)
+
+      if vim.api.nvim_buf_is_valid(buf) then
+        vim.api.nvim_buf_delete(buf, { force = true })
+      end
+      vim.fn.delete(tmp, "rf")
+
+      assert.is_true(ok, err)
+      assert.same({}, record.pending_images_b64)
+      assert.equals("compare <image0> and <image1>", sent_messages[1].content[1].text)
+      assert.equals("data:image/png;base64,abc123", sent_messages[1].content[2].image_url.url)
+      assert.equals("data:image/png;base64,def456", sent_messages[1].content[3].image_url.url)
+    end)
   end)
 
   describe("api chat metadata display", function()
@@ -1206,6 +1249,23 @@ describe("session", function()
     end
   end)
 
+  it("registers Ctrl-P, not Ctrl-V, for API image paste", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    local record = { bufnr = buf }
+
+    session._register_api_keymaps(buf, record, { data_dir = vim.fn.tempname() })
+
+    local maps = vim.api.nvim_buf_get_keymap(buf, "n")
+    vim.api.nvim_buf_delete(buf, { force = true })
+    local has_ctrl_p = false
+    for _, map in ipairs(maps) do
+      if map.lhs == "<C-P>" or map.lhs == "<C-p>" then has_ctrl_p = true end
+      assert.not_equals("<C-V>", map.lhs)
+      assert.not_equals("<C-v>", map.lhs)
+    end
+    assert.is_true(has_ctrl_p)
+  end)
+
   it("does not register a resume keymap for CLI sessions", function()
     local buf = vim.api.nvim_create_buf(false, true)
     local record = { adapter = "mockcli" }
@@ -1314,6 +1374,33 @@ describe("session", function()
 
     assert.same({ role = "user", content = "image question" }, messages[1])
     assert.same({ role = "user", content = "plain follow-up" }, messages[2])
+  end)
+
+  it("inserts numbered image placeholders at the API input cursor", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "Me:", "Compare these" })
+    local win = vim.api.nvim_open_win(buf, true, {
+      relative = "editor",
+      row = 1,
+      col = 1,
+      width = 40,
+      height = 5,
+      style = "minimal",
+    })
+    vim.api.nvim_win_set_cursor(win, { 2, 13 })
+
+    local ok, err = pcall(function()
+      session._insert_image_placeholder(buf, 0)
+    end)
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+
+    vim.api.nvim_win_close(win, true)
+    if vim.api.nvim_buf_is_valid(buf) then
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end
+
+    assert.is_true(ok, err)
+    assert.same({ "Me:", "Compare these <image0>" }, lines)
   end)
 end)
 

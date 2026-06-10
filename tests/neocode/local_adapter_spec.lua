@@ -216,6 +216,19 @@ describe("local adapter", function()
     assert.equals("data:image/png;base64,abc123", with_image.content[2].image_url.url)
   end)
 
+  it("builds text and multiple image user messages for pasted image placeholders", function()
+    local with_images = local_adapter._build_user_message("compare <image0> and <image1>", { "abc123", "def456" })
+
+    assert.equals("user", with_images.role)
+    assert.is_table(with_images.content)
+    assert.equals("text", with_images.content[1].type)
+    assert.equals("compare <image0> and <image1>", with_images.content[1].text)
+    assert.equals("image_url", with_images.content[2].type)
+    assert.equals("data:image/png;base64,abc123", with_images.content[2].image_url.url)
+    assert.equals("image_url", with_images.content[3].type)
+    assert.equals("data:image/png;base64,def456", with_images.content[3].image_url.url)
+  end)
+
   it("builds OpenAI chat completion payloads with tools when provided", function()
     local_adapter.setup({ model = "local-model", temperature = 0.1, max_tokens = 123, read_json = no_metadata_read })
 
