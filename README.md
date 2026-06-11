@@ -306,16 +306,16 @@ Memory and selected skills are injected as system context for NeoCode-managed AP
 | Keymap | Action |
 |--------|--------|
 | `i` | Insert in NeoCode Local's inline draft, or open the multi-line input window when inline editing is unavailable |
-| `R` | Rename current session |
+| `<M-n>r` | Rename current session |
 | `<C-p>` | Paste image from clipboard |
-| `<C-c>` | Interrupt the AI |
-| `Q` | Close session (switches to next if available) |
+| `<M-n>c` | Interrupt the AI |
+| `<M-n>q` | Close session (switches to next if available) |
 | `{` / `}` | Cycle between open sessions |
 | `<S-p>` | Quick session picker |
 | `H` | Toggle window (hide/show) |
 | `?` | Toggle hint overlay |
 
-> **Tip:** Press `<C-\><C-n>` to leave terminal mode first.
+Legacy normal-mode shortcuts `R`, `<C-c>`, and `Q` remain available. In terminal-mode CLI sessions, `<M-n>c`, `<M-n>q`, and `<M-n>r` work without first pressing `<C-\><C-n>`.
 
 ### Multi-line input window
 
@@ -359,7 +359,7 @@ require("neocode").setup({
   keymap_prefix      = "<leader>ai",
   data_dir           = vim.fn.stdpath("data") .. "/neocode",
   telescope_fallback = true,
-  winbar             = "  ? help  /session history  i input  R rename  <C-p> image  <C-c> stop  H toggle  { } cycle\n",
+  winbar             = "  ? help  /session history  i input  <M-n>r rename  <M-n>c stop  <M-n>q close  <C-p> image  H toggle  { } cycle\n",
   auto_compact       = {
     enabled = false, -- API sessions only; CLI adapters such as Continue own their own history
     threshold = 0.8, -- compact at 80% of context_size, e.g. ~20k/24.5k
