@@ -1117,6 +1117,31 @@ function M.rename_current(config)
   end)
 end
 
+function M._cancel_api_response(record)
+  if record.job_id then
+    vim.fn.jobstop(record.job_id)
+    record.job_id = nil
+    vim.bo[record.bufnr].modifiable = true
+    local lc = vim.api.nvim_buf_line_count(record.bufnr)
+    vim.api.nvim_buf_set_lines(record.bufnr, lc, lc, false, { "", "--- [cancelled] ---" })
+    vim.bo[record.bufnr].modifiable = false
+    vim.notify("neocode: response cancelled", vim.log.levels.INFO)
+  end
+end
+
+function M._interrupt_current_cli()
+  local s = M._current()
+  if s and s.job_id then vim.fn.chansend(s.job_id, "\x03") end
+end
+
+function M._register_session_namespace_keymaps(buf, config, cancel_fn, modes)
+  local opts = { buffer = buf, silent = true }
+  modes = modes or { "n" }
+  vim.keymap.set(modes, "<M-n>q", function() M.close(config) end, opts)
+  vim.keymap.set(modes, "<M-n>c", cancel_fn, opts)
+  vim.keymap.set(modes, "<M-n>r", function() M.rename_current(config) end, opts)
+end
+
 -- Terminal lifecycle
 
 -- Spawn a terminal job in `win` for `record` using command `argv`.
@@ -1340,6 +1365,9 @@ end
 
 function M._register_api_keymaps(buf, record, config)
   local opts = { buffer = buf, silent = true }
+  M._register_session_namespace_keymaps(buf, config, function()
+    M._cancel_api_response(record)
+  end, { "n", "i" })
 
   vim.keymap.set("n", "i", function()
     if vim.bo[buf].modifiable then
@@ -1367,15 +1395,7 @@ function M._register_api_keymaps(buf, record, config)
 
   -- Cancel/interrupt streaming response
   vim.keymap.set("n", "<C-c>", function()
-    if record.job_id then
-      vim.fn.jobstop(record.job_id)
-      record.job_id = nil
-      vim.bo[record.bufnr].modifiable = true
-      local lc = vim.api.nvim_buf_line_count(record.bufnr)
-      vim.api.nvim_buf_set_lines(record.bufnr, lc, lc, false, { "", "--- [cancelled] ---" })
-      vim.bo[record.bufnr].modifiable = false
-      vim.notify("neocode: response cancelled", vim.log.levels.INFO)
-    end
+    M._cancel_api_response(record)
   end, opts)
 
   vim.keymap.set("n", "}", function() M.cycle("next", config) end, opts)
@@ -2368,6 +2388,7 @@ end
 
 function M._register_buf_keymaps(buf, record, config)
   local opts = { buffer = buf, silent = true }
+  M._register_session_namespace_keymaps(buf, config, M._interrupt_current_cli, { "n", "t" })
 
   -- Cycle sessions (normal mode — press <C-\><C-n> to reach normal mode first)
   vim.keymap.set("n", "}", function() M.cycle("next", config) end, opts)
@@ -2385,12 +2406,8 @@ function M._register_buf_keymaps(buf, record, config)
   end, opts)
 
   -- Interrupt AI — both normal and terminal mode
-  local function send_interrupt()
-    local s = M._current()
-    if s and s.job_id then vim.fn.chansend(s.job_id, "\x03") end
-  end
-  vim.keymap.set("n", "<C-c>", send_interrupt, opts)
-  vim.keymap.set("t", "<C-c>", send_interrupt, opts)
+  vim.keymap.set("n", "<C-c>", M._interrupt_current_cli, opts)
+  vim.keymap.set("t", "<C-c>", M._interrupt_current_cli, opts)
 
   -- ? toggles hint overlay
   vim.keymap.set("n", "?", function()

@@ -1266,6 +1266,29 @@ describe("session", function()
     assert.is_true(has_ctrl_p)
   end)
 
+  it("registers Alt-N namespace keymaps for API sessions", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    local record = { bufnr = buf }
+
+    session._register_api_keymaps(buf, record, { data_dir = vim.fn.tempname() })
+
+    local normal_maps = vim.api.nvim_buf_get_keymap(buf, "n")
+    local insert_maps = vim.api.nvim_buf_get_keymap(buf, "i")
+    vim.api.nvim_buf_delete(buf, { force = true })
+    local normal = {}
+    local insert = {}
+    for _, map in ipairs(normal_maps) do normal[map.lhs] = true end
+    for _, map in ipairs(insert_maps) do insert[map.lhs] = true end
+
+    assert.is_true(normal["<M-n>q"])
+    assert.is_true(normal["<M-n>c"])
+    assert.is_true(normal["<M-n>r"])
+    assert.is_true(normal["?"])
+    assert.is_true(insert["<M-n>q"])
+    assert.is_true(insert["<M-n>c"])
+    assert.is_true(insert["<M-n>r"])
+  end)
+
   it("does not register a resume keymap for CLI sessions", function()
     local buf = vim.api.nvim_create_buf(false, true)
     local record = { adapter = "mockcli" }
@@ -1279,6 +1302,29 @@ describe("session", function()
       assert.not_equals("<C-h>", map.lhs)
       assert.not_equals("h", map.lhs)
     end
+  end)
+
+  it("registers Alt-N namespace keymaps for CLI sessions", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    local record = { adapter = "mockcli" }
+
+    session._register_buf_keymaps(buf, record, { adapters = {} })
+
+    local normal_maps = vim.api.nvim_buf_get_keymap(buf, "n")
+    local terminal_maps = vim.api.nvim_buf_get_keymap(buf, "t")
+    vim.api.nvim_buf_delete(buf, { force = true })
+    local normal = {}
+    local terminal = {}
+    for _, map in ipairs(normal_maps) do normal[map.lhs] = true end
+    for _, map in ipairs(terminal_maps) do terminal[map.lhs] = true end
+
+    assert.is_true(normal["<M-n>q"])
+    assert.is_true(normal["<M-n>c"])
+    assert.is_true(normal["<M-n>r"])
+    assert.is_true(normal["?"])
+    assert.is_true(terminal["<M-n>q"])
+    assert.is_true(terminal["<M-n>c"])
+    assert.is_true(terminal["<M-n>r"])
   end)
 
   it("strips transient web-search system context from saved API messages", function()
