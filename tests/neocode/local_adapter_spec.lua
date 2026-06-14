@@ -75,6 +75,31 @@ describe("local adapter", function()
     assert.is_truthy(message:find("slots reasoning_format=deepseek", 1, true))
   end)
 
+  it("auto-detects llama-server runtime context even without thinking metadata", function()
+    local props_context = 24576
+    local_adapter.setup({
+      base_url = "http://127.0.0.1:8080/v1",
+      read_json = function(url)
+        if url:match("/v1/models$") then
+          return { data = { { id = "plain-local-model", meta = { n_ctx_train = 262144 } } } }
+        end
+        if url:match("/props$") then
+          return {
+            model_alias = "plain-local-model",
+            default_generation_settings = { n_ctx = props_context },
+          }
+        end
+      end,
+    })
+
+    assert.equals("llama_server", local_adapter.config.provider)
+    assert.equals(24576, local_adapter.config.context_size)
+
+    props_context = 64000
+    assert.is_true(local_adapter.refresh_metadata())
+    assert.equals(64000, local_adapter.config.context_size)
+  end)
+
   it("respects an explicit OpenAI-compatible provider even when llama-server metadata exists", function()
     local_adapter.setup({
       provider = "openai_compatible",
@@ -387,6 +412,20 @@ describe("local adapter", function()
 
     assert.equals("Local model request failed: model not found", text)
     assert.is_true(stats.error)
+  end)
+
+  it("extracts context usage from local context overflow errors", function()
+    local_adapter.setup({ provider = "llama_server", model = "local-model", context_size = 64000, read_json = no_metadata_read })
+
+    local _, stats = local_adapter._complete_from_result({
+      error = { message = "request (33170 tokens) exceeds the available context size (32768 tokens), try increasing it" },
+    })
+
+    assert.is_true(stats.error)
+    assert.equals(33170, stats.usage.prompt_tokens)
+    assert.equals(0, stats.usage.completion_tokens)
+    assert.equals(33170, stats.usage.total_tokens)
+    assert.equals(32768, stats.context_size)
   end)
 
   it("executes tool calls and continues with tool results", function()

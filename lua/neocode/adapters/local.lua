@@ -256,6 +256,9 @@ function M.setup(opts)
   local explicit_model = opts.model ~= nil
   local explicit_context_size = opts.context_size ~= nil
   local explicit_thinking_available = opts.thinking_available ~= nil
+  M._explicit_model = explicit_model
+  M._explicit_context_size = explicit_context_size
+  M._explicit_thinking_available = explicit_thinking_available
   M.config = vim.tbl_deep_extend("force", M.defaults, opts or {})
   local provider_factory, normalized_name = provider_module(M.config.provider)
   M.config.provider = normalized_name
@@ -277,7 +280,11 @@ function M.setup(opts)
       read_json = M.config.read_json,
     })
     local llama_metadata = llama_provider.probe_metadata and llama_provider:probe_metadata() or nil
-    if type(llama_metadata) == "table" and llama_metadata.thinking_available == true then
+    if type(llama_metadata) == "table" and (
+      llama_metadata.thinking_available == true
+      or llama_metadata.provider == "llama-server"
+      or tonumber(llama_metadata.context_size)
+    ) then
       M.provider = llama_provider
       M.config.provider = "llama_server"
       metadata = llama_metadata
@@ -287,6 +294,17 @@ function M.setup(opts)
   M.base_url = M.provider.base_url
   M.model = M.config.model or M.provider.model
   return M
+end
+
+function M.refresh_metadata()
+  ensure_setup()
+  if not (M.provider and M.provider.probe_metadata) then return false end
+  local metadata = M.provider:probe_metadata()
+  if type(metadata) ~= "table" then return false end
+  apply_metadata(metadata, M._explicit_model, M._explicit_context_size, M._explicit_thinking_available)
+  M.base_url = M.provider.base_url
+  M.model = M.config.model or M.provider.model
+  return true, metadata
 end
 
 function M._build_user_message(text, images_b64)
@@ -338,6 +356,10 @@ end
 local function stats_from_result(result)
   local usage = type(result) == "table" and result.usage or nil
   local message = message_from_result(result) or {}
+  local error_message = nil
+  if type(result) == "table" and result.error then
+    error_message = type(result.error) == "table" and result.error.message or result.error
+  end
   local stats = {
     provider = M.config and M.config.provider or "openai_compatible",
     model = M.model,
@@ -352,6 +374,19 @@ local function stats_from_result(result)
   end
   if type(usage) == "table" then
     stats.usage = usage
+  end
+  if type(error_message) == "string" then
+    local requested, available = error_message:match("request%s*%((%d+)%s+tokens%)%s+exceeds%s+the%s+available%s+context%s+size%s*%((%d+)%s+tokens%)")
+    requested = tonumber(requested)
+    available = tonumber(available)
+    if requested and available then
+      stats.context_size = available
+      stats.usage = {
+        prompt_tokens = requested,
+        completion_tokens = 0,
+        total_tokens = requested,
+      }
+    end
   end
   return stats
 end
