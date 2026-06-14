@@ -1089,6 +1089,62 @@ function M.delete_from_disk(session_id, config)
   _write_sessions_json(_sessions_path(config), filtered)
 end
 
+function M.delete_active(session_id, config)
+  local s = M._get(session_id)
+  if not s then return false end
+
+  s._delete_requested = true
+  local bufnr = s.bufnr
+  local winid = s.winid
+  local job_id = s.job_id
+
+  if job_id then
+    pcall(vim.fn.jobstop, job_id)
+  end
+
+  local images = require("neocode.images")
+  for _, path in ipairs(s.pending_images or {}) do
+    images.delete_temp(path)
+  end
+  if s.pending_image then
+    images.delete_temp(s.pending_image)
+    s.pending_image = nil
+  end
+  s.pending_images = {}
+  s.bufnr = nil
+  s.winid = nil
+  s.job_id = nil
+
+  M._remove(s.id)
+  M.delete_from_disk(s.id, config)
+  if config and config.data_dir then
+    pcall(function()
+      require("neocode.llama_session").delete(config.data_dir .. "/llama", s.id)
+    end)
+  end
+
+  local remaining = M._all()
+  if #remaining > 0 then
+    _current_id = remaining[1].id
+  end
+  if winid and vim.api.nvim_win_is_valid(winid) and #remaining > 0 then
+    local next_session = remaining[1]
+    if next_session.bufnr and vim.api.nvim_buf_is_valid(next_session.bufnr) then
+      M._show_session_in_window(next_session, winid)
+    end
+  end
+
+  if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+  end
+
+  if winid and vim.api.nvim_win_is_valid(winid) and #remaining == 0 then
+    pcall(vim.api.nvim_win_close, winid, true)
+  end
+
+  return true
+end
+
 function M.rename_on_disk(session_id, new_title, config)
   local all = M.load_all_from_disk(config)
   for _, s in ipairs(all) do
@@ -1172,6 +1228,15 @@ function M._open_terminal(record, argv, win, config, opts)
         record.pending_image = nil
       end
       record.pending_images = {}
+      if record._delete_requested then
+        record.status = "deleted"
+        record.bufnr  = nil
+        record.winid  = nil
+        record.job_id = nil
+        M.delete_from_disk(record.id, config)
+        M._remove(record.id)
+        return
+      end
       record.status = "closed"
       record.bufnr  = nil
       record.winid  = nil
@@ -1663,7 +1728,12 @@ function M._open_api_input(record, config, opts)
 
     local web_search_active = false
 
+    local function record_alive()
+      return record and not record._delete_requested and M._get(record.id) == record
+    end
+
     local function do_stream()
+      if not record_alive() then return end
       local direct_read_content = nil
       if not web_search_active then
         local direct_read_path = M._direct_read_fast_path(text, record.cwd)
@@ -1805,6 +1875,7 @@ function M._open_api_input(record, config, opts)
       local tool_stream_opts = nil
 
       local function on_complete(response_text, stats, _tool_calls)
+        if not record_alive() then return end
         spinner_active = false
         spinner_timer:stop()
         llama._on_phase_change = nil
@@ -1882,6 +1953,7 @@ function M._open_api_input(record, config, opts)
 
           table.insert(record.messages, { role = "assistant", content = "" })
           local function on_continued(cont_text, cont_stats)
+            if not record_alive() then return end
             -- Merge continued response
             for i = #record.messages, 1, -1 do
               if record.messages[i].role == "assistant" then
@@ -1940,6 +2012,7 @@ function M._open_api_input(record, config, opts)
           tools = tools,
           cwd = record.cwd,
           on_tool_call = function(tool_call, callback)
+            if not record_alive() then return end
             local fn = tool_call["function"] or {}
             local tool_name = (fn.name or ""):match("__(.+)$") or fn.name or "unknown"
 
@@ -1993,6 +2066,7 @@ function M._open_api_input(record, config, opts)
 
               if local_tools.requires_permission and local_tools.requires_permission(resolved_tc) then
                 M._request_tool_permission(record, resolved_tc, function(allowed)
+                  if not record_alive() then return end
                   if allowed then
                     execute_local_tool(true)
                   else
@@ -2014,6 +2088,7 @@ function M._open_api_input(record, config, opts)
                 return
               end
               web_search.search(query, function(results)
+                if not record_alive() then return end
                 if results then
                   callback(web_search.format_context(query, results), false)
                 else
@@ -2026,6 +2101,7 @@ function M._open_api_input(record, config, opts)
             callback("Tool is not available: " .. tostring(resolved_fn.name or "unknown"), true)
           end,
           on_tool_display = function(tool_call, status, result_text)
+            if not record_alive() then return end
             -- Update tool call status and store result preview
             for _, msg in ipairs(record.messages) do
               if msg.tool_calls then
@@ -2052,6 +2128,7 @@ function M._open_api_input(record, config, opts)
             end
           end,
           on_round_start = function(round_num)
+            if not record_alive() then return end
             -- Restart spinner for next round
             spinner_active = true
             spinner_phase = "thinking"
@@ -2093,6 +2170,7 @@ function M._open_api_input(record, config, opts)
 
       local query = web_search.extract_query(text)
       web_search.search(query, function(results)
+        if not record_alive() then return end
         -- Clear searching indicator
         vim.bo[record.bufnr].modifiable = true
         local total = vim.api.nvim_buf_line_count(record.bufnr)

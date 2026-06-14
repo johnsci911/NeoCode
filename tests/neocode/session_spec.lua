@@ -439,6 +439,7 @@ describe("session", function()
         api_adapter = local_adapter,
         cwd = tmp,
       }
+      session._add(record)
 
       local ok, err = pcall(function()
         session._open_api_input(record, { data_dir = tmp }, {
@@ -450,6 +451,7 @@ describe("session", function()
       if vim.api.nvim_buf_is_valid(buf) then
         vim.api.nvim_buf_delete(buf, { force = true })
       end
+      session._remove(record.id)
       vim.fn.delete(tmp, "rf")
 
       assert.is_true(ok, err)
@@ -910,6 +912,91 @@ describe("session", function()
     session._add(s)
     session._remove(s.id)
     assert.is_nil(session._get(s.id))
+  end)
+
+  it("delete_active switches current session to the remaining displayed session", function()
+    local win = vim.api.nvim_get_current_win()
+    local first = session._new_record("local", "First")
+    local second = session._new_record("local", "Second")
+    first.messages = { { role = "user", content = "first" } }
+    second.messages = { { role = "user", content = "second" } }
+    first.bufnr = vim.api.nvim_create_buf(false, true)
+    second.bufnr = vim.api.nvim_create_buf(false, true)
+    session._add(first)
+    session._add(second)
+    session._show_session_in_window(first, win)
+
+    local ok, err = pcall(function()
+      assert.is_true(session.delete_active(first.id, { data_dir = vim.fn.tempname() }))
+    end)
+
+    if second.bufnr and vim.api.nvim_buf_is_valid(second.bufnr) then
+      vim.api.nvim_buf_delete(second.bufnr, { force = true })
+    end
+    assert.is_true(ok, err)
+    assert.equals(second, session._current())
+  end)
+
+  it("delete_active removes legacy llama history files", function()
+    local tmp = vim.fn.tempname()
+    local legacy_dir = tmp .. "/llama"
+    local llama_session = require("neocode.llama_session")
+    local record = session._new_record("llama", "Legacy")
+    record.bufnr = vim.api.nvim_create_buf(false, true)
+    session._add(record)
+    llama_session.save(legacy_dir, record.id, { { role = "user", content = "old" } })
+
+    local ok, err = pcall(function()
+      assert.is_true(session.delete_active(record.id, { data_dir = tmp }))
+    end)
+
+    local exists = vim.fn.filereadable(llama_session._path(legacy_dir, record.id)) == 1
+    vim.fn.delete(tmp, "rf")
+    assert.is_true(ok, err)
+    assert.is_false(exists)
+  end)
+
+  it("delete_active prevents late API callbacks from recreating deleted sessions", function()
+    local tmp = vim.fn.tempname()
+    vim.fn.mkdir(tmp, "p")
+    local buf = vim.api.nvim_create_buf(false, true)
+    local complete = nil
+    local adapter = {
+      name = "local",
+      type = "api",
+      config = { base_url = "http://127.0.0.1:8080", model = "local" },
+      _build_user_message = function(text) return { role = "user", content = text } end,
+      stream = function(_, _, on_complete)
+        complete = on_complete
+        return 99
+      end,
+    }
+    local record = {
+      id = "deleted-late-callback",
+      adapter = "local",
+      title = "Deleted late callback",
+      created_at = 123,
+      bufnr = buf,
+      messages = {},
+      api_adapter = adapter,
+      cwd = tmp,
+    }
+    session._add(record)
+
+    local ok, err = pcall(function()
+      session._open_api_input(record, { data_dir = tmp, auto_compact = { enabled = true } }, {
+        initial_lines = { "Me:", "hello" },
+        auto_send = true,
+      })
+      assert.is_function(complete)
+      assert.is_true(session.delete_active(record.id, { data_dir = tmp }))
+      complete("late response", { usage = { prompt_tokens = 1, completion_tokens = 1, total_tokens = 2 } })
+    end)
+
+    local entries = session.load_all_from_disk({ data_dir = tmp, adapters = { ["local"] = adapter } })
+    vim.fn.delete(tmp, "rf")
+    assert.is_true(ok, err)
+    assert.equals(0, #entries)
   end)
 
   it("_all() returns all sessions", function()
