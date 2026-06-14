@@ -111,7 +111,7 @@ describe("chat_buffer", function()
     }, lines)
   end)
 
-  it("renders chat context and thinking status above the draft", function()
+  it("renders thinking status above the draft without top context usage", function()
     local lines = chat_buffer.render_lines({}, {
       status = {
         context_size = 24576,
@@ -122,7 +122,7 @@ describe("chat_buffer", function()
     })
 
     assert.are.same({
-      "Context: 12288 / 24576 | 50% · Thinking: low",
+      "Thinking: low",
       "",
       "Me:",
       "",
@@ -130,7 +130,7 @@ describe("chat_buffer", function()
     }, lines)
   end)
 
-  it("does not render thinking status when thinking is unavailable", function()
+  it("does not render top context usage when thinking is unavailable", function()
     local lines = chat_buffer.render_lines({}, {
       status = {
         context_size = 32768,
@@ -141,12 +141,47 @@ describe("chat_buffer", function()
     })
 
     assert.are.same({
-      "Context: 16192 / 32768 | 49%",
-      "",
       "Me:",
       "",
       "Press <C-s>, <C-CR>, or <M-CR> to send",
     }, lines)
+  end)
+
+  it("renders context usage below assistant responses using current context size", function()
+    local lines = chat_buffer.render_lines({
+      {
+        role = "assistant",
+        content = "Done.",
+        _stats = { usage = { prompt_tokens = 12000, completion_tokens = 500, total_tokens = 12500 }, context_size = 32768 },
+      },
+    }, {
+      status = { context_size = 64000 },
+    })
+
+    local text = table.concat(lines, "\n")
+    assert.is_truthy(text:find("12.5k / 64k context used", 1, true))
+    assert.is_falsy(text:find("Context:", 1, true))
+  end)
+
+  it("renders failed context overflow with server-reported context size", function()
+    local lines = chat_buffer.render_lines({
+      {
+        role = "assistant",
+        content = "Local model request failed: request too large",
+        _stats = {
+          error = true,
+          usage = { prompt_tokens = 33170, completion_tokens = 0, total_tokens = 33170 },
+          context_size = 32768,
+        },
+      },
+    }, {
+      status = { context_size = 64000 },
+    })
+
+    local text = table.concat(lines, "\n")
+    assert.is_truthy(text:find("❌", 1, true))
+    assert.is_truthy(text:find("33.2k / 32.8k context used", 1, true))
+    assert.is_falsy(text:find("33.2k / 64k context used", 1, true))
   end)
 
   it("omits the status line when no chat metadata is available", function()

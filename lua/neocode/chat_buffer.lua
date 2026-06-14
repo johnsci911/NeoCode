@@ -30,21 +30,24 @@ end
 local function status_lines(status)
   if type(status) ~= "table" then return {} end
   local parts = {}
-  local context_size = tonumber(status.context_size)
-  local context_used = tonumber(status.context_used)
-  if context_size then
-    if context_used then
-      local percent = math.floor((context_used / context_size * 100) + 0.5)
-      table.insert(parts, string.format("Context: %d / %d | %d%%", context_used, context_size, percent))
-    else
-      table.insert(parts, "Context window: " .. tostring(context_size))
-    end
-  end
   if status.thinking_available == true and type(status.thinking_mode) == "string" and status.thinking_mode ~= "" then
     table.insert(parts, "Thinking: " .. status.thinking_mode)
   end
   if #parts == 0 then return {} end
   return { table.concat(parts, " · ") }
+end
+
+local function format_context_tokens(value)
+  value = tonumber(value)
+  if not value then return nil end
+  if value >= 1000 then
+    local rounded = math.floor((value / 1000) * 10 + 0.5) / 10
+    if rounded == math.floor(rounded) then
+      return tostring(math.floor(rounded)) .. "k"
+    end
+    return string.format("%.1fk", rounded)
+  end
+  return tostring(value)
 end
 
 local function separator(label)
@@ -124,6 +127,7 @@ end
 -- virtual text in refresh().
 function M.render_lines(messages, opts)
   local lines = status_lines(opts and opts.status)
+  local current_context_size = opts and opts.status and tonumber(opts.status.context_size) or nil
   if #messages == 0 then
     append_draft_prompt(lines)
     if opts and opts.metadata then return lines, {} end
@@ -266,7 +270,7 @@ function M.render_lines(messages, opts)
     end
 
     -- Show stats/done indicator for completed assistant messages
-    if msg.role == "assistant" and msg._stats then
+    if msg.role == "assistant" and msg._stats and has_text then
       local s = msg._stats
       if #body > 0 then table.insert(body, "") end
       local parts = {}
@@ -285,15 +289,18 @@ function M.render_lines(messages, opts)
         table.insert(parts, string.format("%.1f t/s", s.tps))
       end
       if s.prompt_tokens and s.prompt_tokens > 0 then
-        local ctx_max = s.context_size or 32768
+        local ctx_max = (s.error and s.context_size) or current_context_size or s.context_size or 32768
         local used = s.prompt_tokens + (s.completion_tokens or 0)
-        local pct = math.floor((used / ctx_max) * 100)
-        table.insert(parts, string.format("ctx: %d/%d (%d%%)", used, ctx_max, pct))
+        table.insert(parts, string.format("%s / %s context used", format_context_tokens(used), format_context_tokens(ctx_max)))
+      elseif type(s.usage) == "table" and tonumber(s.usage.prompt_tokens) and tonumber(s.usage.prompt_tokens) > 0 then
+        local ctx_max = (s.error and s.context_size) or current_context_size or s.context_size or 32768
+        local used = tonumber(s.usage.total_tokens) or (tonumber(s.usage.prompt_tokens) + (tonumber(s.usage.completion_tokens) or 0))
+        table.insert(parts, string.format("%s / %s context used", format_context_tokens(used), format_context_tokens(ctx_max)))
       end
       if #parts > 0 then
-        table.insert(body, "✅ " .. table.concat(parts, " · "))
+        table.insert(body, (s.error and "❌ " or "✅ ") .. table.concat(parts, " · "))
       else
-        table.insert(body, "✅ Done")
+        table.insert(body, s.error and "❌ Failed" or "✅ Done")
       end
     end
 
