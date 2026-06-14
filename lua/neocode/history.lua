@@ -140,11 +140,12 @@ function M.pick(config)
         end
 
         local deleted = 0
-        local skipped = 0
         for _, entry in ipairs(selections) do
           local sel = entry.value
           if sel.status == "active" then
-            skipped = skipped + 1
+            if session.delete_active(sel.id, config) then
+              deleted = deleted + 1
+            end
           else
             session.delete_from_disk(sel.id, config)
             -- Also delete the llama session messages file
@@ -155,9 +156,6 @@ function M.pick(config)
           end
         end
 
-        if skipped > 0 then
-          vim.notify("neocode: skipped " .. skipped .. " active session(s) — close them first", vim.log.levels.WARN)
-        end
         if deleted > 0 then
           vim.notify("neocode: deleted " .. deleted .. " session(s)", vim.log.levels.INFO)
         end
