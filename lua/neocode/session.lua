@@ -455,10 +455,20 @@ local function latest_completed_assistant_stats(messages)
   return nil
 end
 
+function M._refresh_api_adapter_metadata(record)
+  local adapter = record and record.api_adapter
+  if not adapter or type(adapter.refresh_metadata) ~= "function" then return false end
+  local ok, refreshed = pcall(function() return adapter.refresh_metadata(adapter) end)
+  return ok and refreshed == true
+end
+
 function M._refresh_api_chat(record, opts)
   local chat_buffer = require("neocode.chat_buffer")
   opts = opts or {}
   if not record or not record.bufnr or not vim.api.nvim_buf_is_valid(record.bufnr) then return end
+  if opts.refresh_metadata == true then
+    M._refresh_api_adapter_metadata(record)
+  end
   local adapter = record.api_adapter or {}
   local adapter_config = adapter.config or {}
   local thinking_available = false
@@ -1629,6 +1639,8 @@ function M._open_api_input(record, config, opts)
       M._refresh_api_chat(record, { draft = true, editable = true })
       return
     end
+
+    M._refresh_api_adapter_metadata(record)
 
     -- Age any existing web-search system messages and drop stale ones.
     -- Web search results are only relevant to the turn that requested them

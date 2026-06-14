@@ -461,7 +461,7 @@ describe("session", function()
   end)
 
   describe("api chat metadata display", function()
-    it("shows context window and supported thinking mode in refreshed local chat", function()
+    it("shows supported thinking mode and bottom context usage in refreshed local chat", function()
       local buf = vim.api.nvim_create_buf(false, true)
       local record = {
         bufnr = buf,
@@ -479,7 +479,8 @@ describe("session", function()
 
       local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
       vim.api.nvim_buf_delete(buf, { force = true })
-      assert.equals("Context: 12288 / 24576 | 50% · Thinking: medium", lines[1])
+      assert.equals("Thinking: medium", lines[1])
+      assert.is_truthy(table.concat(lines, "\n"):find("12.3k / 24.6k context used", 1, true))
       assert.is_truthy(vim.tbl_contains(lines, "Me:"))
     end)
 
@@ -500,7 +501,7 @@ describe("session", function()
 
       local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
       vim.api.nvim_buf_delete(buf, { force = true })
-      assert.equals("Context window: 24576", lines[1])
+      assert.equals("Me:", lines[1])
     end)
 
     it("hides thinking mode when the adapter does not support thinking", function()
@@ -519,7 +520,7 @@ describe("session", function()
 
       local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
       vim.api.nvim_buf_delete(buf, { force = true })
-      assert.equals("Context window: 32768", lines[1])
+      assert.equals("Me:", lines[1])
       assert.is_falsy(table.concat(lines, "\n"):find("Thinking:", 1, true))
     end)
 
@@ -541,8 +542,34 @@ describe("session", function()
 
       local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
       vim.api.nvim_buf_delete(buf, { force = true })
-      assert.equals("Context window: 16384", lines[1])
+      assert.equals("Me:", lines[1])
       assert.is_falsy(table.concat(lines, "\n"):find("Thinking:", 1, true))
+    end)
+
+    it("refreshes adapter metadata before rendering API chat", function()
+      local buf = vim.api.nvim_create_buf(false, true)
+      local refreshed = false
+      local record = {
+        bufnr = buf,
+        messages = {
+          { role = "assistant", content = "done", _stats = { usage = { prompt_tokens = 32000, completion_tokens = 1000 } } },
+        },
+        api_adapter = {
+          config = { context_size = 32768 },
+          refresh_metadata = function(adapter)
+            refreshed = true
+            adapter.config.context_size = 64000
+            return true
+          end,
+        },
+      }
+
+      session._refresh_api_chat(record, { draft = true, editable = true, refresh_metadata = true })
+
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      vim.api.nvim_buf_delete(buf, { force = true })
+      assert.is_true(refreshed)
+      assert.is_truthy(table.concat(lines, "\n"):find("33k / 64k context used", 1, true))
     end)
   end)
 
@@ -690,6 +717,24 @@ describe("session", function()
       assert.is_true(record._auto_compact_pending)
       assert.equals(20000, record._auto_compact_last_usage.prompt_tokens)
       assert.equals(24576, record._auto_compact_last_usage.context_size)
+    end)
+
+    it("marks auto compaction from parsed overflow error stats", function()
+      local record = {
+        api_adapter = { config = { context_size = 64000, base_url = "http://127.0.0.1:8080", model = "local" } },
+      }
+      local config = {
+        auto_compact = { enabled = true, threshold = 0.8 },
+      }
+
+      assert.is_true(session._mark_auto_compact_if_needed(config, record, {
+        error = true,
+        context_size = 32768,
+        usage = { prompt_tokens = 33170, completion_tokens = 0, total_tokens = 33170 },
+      }))
+      assert.is_true(record._auto_compact_pending)
+      assert.equals(33170, record._auto_compact_last_usage.used_tokens)
+      assert.equals(32768, record._auto_compact_last_usage.context_size)
     end)
 
     it("preserves the requested number of recent turns for compacted history", function()
