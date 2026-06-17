@@ -237,6 +237,53 @@ function M._build_project_tools(text, cwd)
   return tools
 end
 
+function M._assistant_stalled_after_action_promise(response_text)
+  local clean = (response_text or "")
+    :gsub("<think>.-</think>", "")
+    :gsub("```.-```", "")
+    :gsub("</?tool_call>", "")
+    :gsub("^%s+", "")
+    :gsub("%s+$", "")
+  if clean == "" or #clean > 320 then return false end
+  if clean:match("%?$") then return false end
+
+  local lower = clean:lower()
+  if lower:match("cannot%s+") or lower:match("can't%s+") or lower:match("need%s+.*clarif") then
+    return false
+  end
+  if lower:match("i inspected") or lower:match("i checked") or lower:match("i found")
+      or lower:match("i updated") or lower:match("i changed") or lower:match("i ran") then
+    return false
+  end
+
+  local promise_patterns = {
+    "let me%s+look",
+    "let me%s+check",
+    "let me%s+inspect",
+    "let me%s+read",
+    "i['’]?ll%s+look",
+    "i['’]?ll%s+check",
+    "i['’]?ll%s+inspect",
+    "i['’]?ll%s+read",
+    "i['’]?ll%s+update",
+    "i['’]?ll%s+modify",
+    "i['’]?ll%s+fix",
+    "i['’]?ll%s+run",
+    "i%s+will%s+look",
+    "i%s+will%s+check",
+    "i%s+will%s+inspect",
+    "i%s+will%s+read",
+    "i%s+will%s+update",
+    "i%s+will%s+modify",
+    "i%s+will%s+fix",
+    "i%s+will%s+run",
+  }
+  for _, pattern in ipairs(promise_patterns) do
+    if lower:match(pattern) then return true end
+  end
+  return false
+end
+
 function M._tool_permission_key(tool_call)
   local fn = tool_call and (tool_call["function"] or tool_call) or {}
   local name = fn.name or "unknown"
@@ -1871,6 +1918,7 @@ function M._open_api_input(record, config, opts)
       end
 
       local auto_continue_count = 0
+      local stalled_action_continue_count = 0
       local max_auto_continues = 3
       local tool_stream_opts = nil
 
@@ -1903,6 +1951,7 @@ function M._open_api_input(record, config, opts)
         -- Detect truncated/incomplete response and auto-continue
         local clean = (response_text or ""):gsub("<think>.-</think>", ""):gsub("</?tool_call>", ""):gsub("^%s+", ""):gsub("%s+$", "")
         local is_truncated = false
+        local is_stalled_action = false
         if clean ~= "" and auto_continue_count < max_auto_continues then
           -- Check for signs of truncation (be conservative to avoid false positives)
           local last_line = clean:match("[^\n]*$") or ""
@@ -1927,20 +1976,36 @@ function M._open_api_input(record, config, opts)
           elseif last_line:match("^%d+%.%s*$") or last_line:match("^%-%s*$") or last_line:match("^%*%s*$") then
             is_truncated = true
           end
+
+          if not is_truncated and not had_tool_calls and stalled_action_continue_count < 1
+              and M._assistant_stalled_after_action_promise(response_text) then
+            is_truncated = true
+            is_stalled_action = true
+            stalled_action_continue_count = stalled_action_continue_count + 1
+          end
         end
 
         if is_truncated then
           auto_continue_count = auto_continue_count + 1
-          -- Auto-continue: add a continue prompt
-          table.insert(record.messages, { role = "user", content = "Continue." })
+          local continue_prompt = "Continue."
+          if is_stalled_action then
+            continue_prompt = "You said you were going to inspect, modify, test, or continue the task, "
+              .. "but your previous response stopped before doing that. Continue now. "
+              .. "If tools are available, use them. Do not apologize; perform the next concrete step and verify the result."
+          end
+          table.insert(record.messages, { role = "user", content = continue_prompt })
 
           -- Show indicator
           if record.bufnr and vim.api.nvim_buf_is_valid(record.bufnr) then
             chat_buffer.refresh(record.bufnr, record.messages)
             vim.bo[record.bufnr].modifiable = true
             local lc = vim.api.nvim_buf_line_count(record.bufnr)
+            local continuation_label = "💭 Continuing..."
+            if is_stalled_action then
+              continuation_label = "⚠ Assistant stalled after promising an action — nudging continuation..."
+            end
             vim.api.nvim_buf_set_lines(record.bufnr, lc, lc, false, {
-              "", "### Assistant", "", "💭 Continuing..."
+              "", "### Assistant", "", continuation_label
             })
             vim.bo[record.bufnr].modifiable = false
           end

@@ -462,6 +462,70 @@ describe("session", function()
     end)
   end)
 
+  describe("stalled assistant continuation", function()
+    it("detects short action promises that did not make progress", function()
+      assert.is_true(session._assistant_stalled_after_action_promise("Let me look at it."))
+      assert.is_true(session._assistant_stalled_after_action_promise("I'll inspect the file."))
+      assert.is_true(session._assistant_stalled_after_action_promise("I will run the tests now."))
+    end)
+
+    it("does not flag clarification questions or completed work", function()
+      assert.is_false(session._assistant_stalled_after_action_promise("Which file should I inspect?"))
+      assert.is_false(session._assistant_stalled_after_action_promise("I inspected the file and found the issue: the handler returns early."))
+      assert.is_false(session._assistant_stalled_after_action_promise("I cannot inspect that without a file path."))
+    end)
+
+    it("auto-continues once when the assistant stops after promising action", function()
+      local tmp = vim.fn.tempname()
+      vim.fn.mkdir(tmp, "p")
+      local buf = vim.api.nvim_create_buf(false, true)
+      local stream_calls = 0
+      local adapter = {
+        name = "local",
+        type = "api",
+        config = { base_url = "http://127.0.0.1:8080", model = "local" },
+        _build_user_message = function(text) return { role = "user", content = text } end,
+        stream = function(messages, _, on_complete)
+          stream_calls = stream_calls + 1
+          if stream_calls == 1 then
+            on_complete("Let me look at it.", { usage = { prompt_tokens = 1, completion_tokens = 1, total_tokens = 2 } })
+          else
+            assert.is_truthy((messages[#messages - 1].content or ""):find("You said you were going to", 1, true))
+            on_complete("I inspected it and found the next step.", { usage = { prompt_tokens = 2, completion_tokens = 2, total_tokens = 4 } })
+          end
+          return 88 + stream_calls
+        end,
+      }
+      local record = {
+        id = "stalled-auto-continue",
+        adapter = "local",
+        title = "Stalled auto continue",
+        created_at = 123,
+        bufnr = buf,
+        messages = {},
+        api_adapter = adapter,
+        cwd = tmp,
+      }
+      session._add(record)
+
+      local ok, err = pcall(function()
+        session._open_api_input(record, { data_dir = tmp }, {
+          initial_lines = { "Me:", "can you help with this?" },
+          auto_send = true,
+        })
+      end)
+
+      if vim.api.nvim_buf_is_valid(buf) then
+        vim.api.nvim_buf_delete(buf, { force = true })
+      end
+      session._remove(record.id)
+      vim.fn.delete(tmp, "rf")
+
+      assert.is_true(ok, err)
+      assert.equals(2, stream_calls)
+    end)
+  end)
+
   describe("api chat metadata display", function()
     it("shows supported thinking mode and bottom context usage in refreshed local chat", function()
       local buf = vim.api.nvim_create_buf(false, true)
