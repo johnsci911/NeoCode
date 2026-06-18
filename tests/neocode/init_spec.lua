@@ -22,7 +22,7 @@ describe("neocode.setup", function()
     assert.is_not_nil(neocode._config.data_dir)
   end)
 
-  it("provides disabled auto-compaction defaults", function()
+  it("provides always-on auto-compaction tuning defaults", function()
     local dummy = {
       name          = "dummy",
       session_store = false,
@@ -33,7 +33,7 @@ describe("neocode.setup", function()
 
     neocode.setup({ adapters = { dummy = dummy } })
 
-    assert.is_false(neocode._config.auto_compact.enabled)
+    assert.is_nil(neocode._config.auto_compact.enabled)
     assert.equals(0.8, neocode._config.auto_compact.threshold)
     assert.equals(4, neocode._config.auto_compact.preserve_recent_turns)
   end)

@@ -11,7 +11,6 @@ local DEFAULT_CONFIG = {
   winbar             = "  ? help  /session history  i input  <M-n>r rename  <M-n>c stop  <M-n>q close  <C-p> image  H toggle  { } cycle\n",
   adapters           = {},
   auto_compact       = {
-    enabled = false,
     threshold = 0.8,
     preserve_recent_turns = 4,
   },

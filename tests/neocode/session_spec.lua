@@ -706,16 +706,53 @@ describe("session", function()
 
   describe("auto compaction helpers", function()
     it("uses runtime context size from stats before adapter or config fallbacks", function()
+      local stale_config_context = 16384
+      local adapter_context = 32768
+      local current_model_context = 24576
       local record = {
         api_adapter = {
-          config = { context_size = 32768 },
+          config = { context_size = adapter_context },
         },
       }
       local config = {
-        auto_compact = { context_size = 16384 },
+        auto_compact = { context_size = stale_config_context },
       }
 
-      assert.equals(24576, session._auto_compact_context_size(config, record, { context_size = 24576 }))
+      assert.equals(current_model_context, session._auto_compact_context_size(config, record, { context_size = current_model_context }))
+    end)
+
+    it("ignores auto compact context_size settings in favor of adapter metadata", function()
+      local stale_config_context = 16384
+      local current_model_context = 32768
+      local record = {
+        api_adapter = {
+          config = { context_size = current_model_context },
+        },
+      }
+
+      assert.equals(current_model_context, session._auto_compact_context_size({
+        auto_compact = { context_size = stale_config_context },
+      }, record, {}))
+    end)
+
+    it("uses current model context size when deciding the compaction threshold", function()
+      local smaller_runtime_context = 32768
+      local larger_runtime_context = 65536
+      local used_tokens = 50000
+      local record = {
+        api_adapter = {
+          config = { context_size = smaller_runtime_context },
+        },
+      }
+
+      assert.is_false(session._should_auto_compact({}, record, {
+        context_size = larger_runtime_context,
+        usage = { prompt_tokens = used_tokens, completion_tokens = 0 },
+      }))
+      assert.is_true(session._should_auto_compact({}, record, {
+        context_size = smaller_runtime_context,
+        usage = { prompt_tokens = used_tokens, completion_tokens = 0 },
+      }))
     end)
 
     it("falls back to adapter context size", function()
@@ -752,32 +789,51 @@ describe("session", function()
           config = { context_size = 24576 },
         },
       }
-      local config = {
-        auto_compact = { enabled = true, threshold = 0.8 },
-      }
+      local config = { auto_compact = { threshold = 0.8 } }
 
       assert.is_false(session._should_auto_compact(config, record, { prompt_tokens = 19000 }))
       assert.is_true(session._should_auto_compact(config, record, { prompt_tokens = 20000 }))
     end)
 
-    it("does not compact when disabled or already compacting", function()
+    it("auto compacts by default when enabled is omitted", function()
+      local current_model_context = 32768
+      local near_full_usage = 32000
+      local record = {
+        api_adapter = {
+          config = { context_size = current_model_context },
+        },
+      }
+      local config = {
+        auto_compact = { threshold = 0.8 },
+      }
+
+      assert.is_true(session._should_auto_compact(config, record, { prompt_tokens = near_full_usage }))
+    end)
+
+    it("does not expose auto compaction as a disable switch", function()
+      local current_model_context = 32768
+      local near_full_usage = 32000
+      local record = {
+        api_adapter = { config = { context_size = current_model_context } },
+      }
+
+      assert.is_true(session._should_auto_compact({ auto_compact = { enabled = false } }, record, { prompt_tokens = near_full_usage }))
+    end)
+
+    it("does not compact while already compacting", function()
       local record = {
         _auto_compact_running = true,
         api_adapter = { config = { context_size = 24576 } },
       }
 
-      assert.is_false(session._should_auto_compact({ auto_compact = { enabled = true } }, record, { prompt_tokens = 24576 }))
-      record._auto_compact_running = false
-      assert.is_false(session._should_auto_compact({ auto_compact = { enabled = false } }, record, { prompt_tokens = 24576 }))
+      assert.is_false(session._should_auto_compact({ auto_compact = {} }, record, { prompt_tokens = 24576 }))
     end)
 
     it("marks the next turn for compaction after a high-context response", function()
       local record = {
         api_adapter = { config = { context_size = 24576, base_url = "http://127.0.0.1:8080", model = "local" } },
       }
-      local config = {
-        auto_compact = { enabled = true, threshold = 0.8 },
-      }
+      local config = { auto_compact = { threshold = 0.8 } }
 
       assert.is_true(session._mark_auto_compact_if_needed(config, record, { prompt_tokens = 20000 }))
       assert.is_true(record._auto_compact_pending)
@@ -789,9 +845,7 @@ describe("session", function()
       local record = {
         api_adapter = { config = { context_size = 64000, base_url = "http://127.0.0.1:8080", model = "local" } },
       }
-      local config = {
-        auto_compact = { enabled = true, threshold = 0.8 },
-      }
+      local config = { auto_compact = { threshold = 0.8 } }
 
       assert.is_true(session._mark_auto_compact_if_needed(config, record, {
         error = true,

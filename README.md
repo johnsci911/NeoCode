@@ -361,9 +361,7 @@ require("neocode").setup({
   telescope_fallback = true,
   winbar             = "  ? help  /session history  i input  <M-n>r rename  <M-n>c stop  <M-n>q close  <C-p> image  H toggle  { } cycle\n",
   auto_compact       = {
-    enabled = false, -- API sessions only; CLI adapters such as Continue own their own history
-    threshold = 0.8, -- compact at 80% of context_size, e.g. ~20k/24.5k
-    context_size = 24576,
+    threshold = 0.8, -- compact at 80% of the current model/server context size
     preserve_recent_turns = 4,
   },
   adapters = {

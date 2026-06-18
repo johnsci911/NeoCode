@@ -752,12 +752,6 @@ function M._auto_compact_context_size(config, record, stats)
     if positive_number(adapter_cfg.context_length) then return adapter_cfg.context_length end
   end
 
-  local auto_cfg = config and config.auto_compact
-  if auto_cfg then
-    if positive_number(auto_cfg.context_size) then return auto_cfg.context_size end
-    if positive_number(auto_cfg.context_length) then return auto_cfg.context_length end
-  end
-
   return nil
 end
 
@@ -778,8 +772,7 @@ function M._auto_compact_used_tokens(stats)
 end
 
 function M._should_auto_compact(config, record, stats)
-  local auto_cfg = config and config.auto_compact
-  if not auto_cfg or auto_cfg.enabled ~= true then return false end
+  local auto_cfg = (config and config.auto_compact) or {}
   if record and (record._auto_compact_running or record._auto_compact_pending) then return false end
 
   local context_size = M._auto_compact_context_size(config, record, stats)
