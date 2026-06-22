@@ -312,6 +312,35 @@ end
 
 function M.new(opts)
   opts = opts or {}
+  if opts.lazy then
+    local setup_opts = vim.tbl_extend("force", {}, opts)
+    setup_opts.lazy = nil
+    local instance = {
+      name = opts.name or M.name,
+      type = M.type,
+      session_store = M.session_store,
+      config = vim.tbl_deep_extend("force", M.defaults, setup_opts),
+      provider_name = opts.provider,
+    }
+
+    local function activate()
+      M.setup(setup_opts)
+      instance.config = M.config
+      instance.base_url = M.base_url
+      instance.model = M.model
+      return M
+    end
+
+    instance.refresh_metadata = function(...) return activate().refresh_metadata(...) end
+    instance.stream = function(...) return activate().stream(...) end
+    instance.stream_with_tools = function(...) return activate().stream_with_tools(...) end
+    instance._build_user_message = function(...) return activate()._build_user_message(...) end
+    instance.thinking_available = function(...) return activate().thinking_available(...) end
+    instance.thinking_mode = function(...) return activate().thinking_mode(...) end
+    instance.set_thinking = function(...) return activate().set_thinking(...) end
+    return instance
+  end
+
   M.setup(opts)
   local instance = vim.tbl_extend("force", {}, M)
   instance.name = opts.name or M.name

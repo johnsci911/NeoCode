@@ -47,9 +47,10 @@ describe("launcher", function()
     end
 
     assert.equals("  NeoCode Local", labels["local"])
+    assert.equals("  NeoCode OpenAI", labels.openai)
   end)
 
-  it("self-heals stale launcher configs that do not include NeoCode Local", function()
+  it("self-heals stale launcher configs that do not include built-in NeoCode API adapters", function()
     local stale_config = {
       adapters = {
         claude = require("neocode.adapters.claude"),
@@ -62,6 +63,8 @@ describe("launcher", function()
     end
 
     assert.equals("  NeoCode Local", labels["local"])
+    assert.equals("  NeoCode OpenAI", labels.openai)
     assert.is_table(stale_config.adapters["local"])
+    assert.is_table(stale_config.adapters.openai)
   end)
 end)

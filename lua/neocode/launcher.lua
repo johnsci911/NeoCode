@@ -25,10 +25,17 @@ end
 
 local function ensure_builtin_adapters(config)
   config.adapters = config.adapters or {}
-  if not config.adapters["local"] then
-    local ok, local_adapter = pcall(require, "neocode.adapters.local")
-    if ok then
+  local ok, local_adapter = pcall(require, "neocode.adapters.local")
+  if ok then
+    if not config.adapters["local"] then
       config.adapters["local"] = local_adapter
+    end
+    if not config.adapters.openai then
+      config.adapters.openai = local_adapter.new({
+        name = "openai",
+        provider = "openai",
+        lazy = true,
+      })
     end
   end
 end
