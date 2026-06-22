@@ -165,6 +165,16 @@ local_adapter.setup({
 })
 ```
 
+To use OpenAI directly, set `OPENAI_API_KEY` and choose the OpenAI provider. If `model` is omitted, NeoCode probes OpenAI's current `/v1/models` list and selects an available chat model instead of relying on a hardcoded default:
+
+```lua
+local_adapter.setup({
+  provider = "openai",
+  -- api_key = "...", -- optional; defaults to OPENAI_API_KEY
+  -- model = "...",   -- optional; discovered from /v1/models when omitted
+})
+```
+
 NeoCode Local uses NeoCode-managed API sessions, so `/compact`, history resume, native project tools, and web-search tool routing work through NeoCode rather than Continue.
 
 NeoCode Local can expose workspace tools to the model:

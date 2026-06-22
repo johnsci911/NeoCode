@@ -135,6 +135,23 @@ describe("local adapter", function()
     assert.equals("local-model", local_adapter.model)
   end)
 
+  it("uses OpenAI provider model discovery instead of a hardcoded model", function()
+    local_adapter.setup({
+      provider = "openai",
+      api_key = "test-key",
+      read_json = function(url, opts)
+        assert.equals("https://api.openai.com/v1/models", url)
+        assert.equals("Bearer test-key", opts.headers.Authorization)
+        return { data = { { id = "gpt-4o-mini" } } }
+      end,
+    })
+
+    assert.equals("openai", local_adapter.config.provider)
+    assert.equals("https://api.openai.com/v1", local_adapter.base_url)
+    assert.equals("gpt-4o-mini", local_adapter.model)
+    assert.equals("gpt-4o-mini", local_adapter.config.model)
+  end)
+
   it("uses probed provider metadata to populate model and context for compaction", function()
     local_adapter.setup({
       provider_probe = function()
@@ -299,6 +316,34 @@ describe("local adapter", function()
     for _, arg in ipairs(captured_argv) do
       assert.is_true(#tostring(arg) < 10000)
     end
+  end)
+
+  it("sends OpenAI bearer auth on chat completion requests", function()
+    local_adapter.setup({
+      provider = "openai",
+      api_key = "test-key",
+      read_json = function()
+        return { data = { { id = "gpt-4o-mini" } } }
+      end,
+    })
+    local original_jobstart = vim.fn.jobstart
+    local captured_argv = nil
+    vim.fn.jobstart = function(argv, opts)
+      captured_argv = argv
+      if opts and opts.on_stdout then opts.on_stdout(78, { '{"choices":[{"message":{"content":"ok"}}]}' }) end
+      if opts and opts.on_exit then opts.on_exit(78, 0) end
+      return 78
+    end
+
+    local ok, err = pcall(function()
+      local_adapter.stream({ { role = "user", content = "hello" } }, nil, function() end)
+    end)
+
+    vim.fn.jobstart = original_jobstart
+    assert.is_true(ok, err)
+    assert.is_table(captured_argv)
+    assert.is_truthy(vim.tbl_contains(captured_argv, "Authorization: Bearer test-key"))
+    assert.equals("https://api.openai.com/v1/chat/completions", captured_argv[#captured_argv])
   end)
 
   it("sanitizes corrupted assistant history before building request payloads", function()

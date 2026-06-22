@@ -26,6 +26,9 @@ local THINKING_PRESETS = {
 }
 
 local function provider_module(name)
+  if name == "openai" then
+    return require("neocode.providers.openai"), "openai"
+  end
   if name == "llama_server" or name == "llama-server" then
     return require("neocode.providers.llama_server"), "llama_server"
   end
@@ -253,6 +256,7 @@ end
 function M.setup(opts)
   opts = opts or {}
   local explicit_provider = opts.provider ~= nil
+  local explicit_base_url = opts.base_url ~= nil
   local explicit_model = opts.model ~= nil
   local explicit_context_size = opts.context_size ~= nil
   local explicit_thinking_available = opts.thinking_available ~= nil
@@ -262,12 +266,22 @@ function M.setup(opts)
   M.config = vim.tbl_deep_extend("force", M.defaults, opts or {})
   local provider_factory, normalized_name = provider_module(M.config.provider)
   M.config.provider = normalized_name
+  local provider_base_url = M.config.base_url
+  if normalized_name == "openai" and not explicit_base_url then
+    provider_base_url = nil
+  end
   M.provider = provider_factory.setup({
-    base_url = M.config.base_url,
+    base_url = provider_base_url,
     model = M.config.model,
     fallback_context_size = M.config.context_size,
     probe = M.config.provider_probe,
     read_json = M.config.read_json,
+    api_key = M.config.api_key,
+    api_key_env = M.config.api_key_env,
+    organization = M.config.organization,
+    organization_env = M.config.organization_env,
+    project = M.config.project,
+    project_env = M.config.project_env,
   })
   local metadata = M.provider.probe_metadata and M.provider:probe_metadata() or nil
   if not explicit_provider and normalized_name == "openai_compatible" then
@@ -442,13 +456,22 @@ local function default_transport(messages, extra, callback)
     callback(result)
   end
 
-  return vim.fn.jobstart({
+  local argv = {
     "curl", "--silent", "--show-error", "--fail-with-body",
     "-X", "POST",
     "-H", "Content-Type: application/json",
-    "--data-binary", "@" .. payload_path,
-    "--", url,
-  }, {
+  }
+  if M.provider and M.provider.curl_auth_args then
+    for _, arg in ipairs(M.provider:curl_auth_args()) do
+      table.insert(argv, arg)
+    end
+  end
+  table.insert(argv, "--data-binary")
+  table.insert(argv, "@" .. payload_path)
+  table.insert(argv, "--")
+  table.insert(argv, url)
+
+  return vim.fn.jobstart(argv, {
     stdout_buffered = true,
     stderr_buffered = true,
     on_stdout = function(_, data)
