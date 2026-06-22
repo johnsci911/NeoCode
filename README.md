@@ -168,10 +168,15 @@ local_adapter.setup({
 To use OpenAI directly, set `OPENAI_API_KEY` and choose the OpenAI provider. If `model` is omitted, NeoCode probes OpenAI's current `/v1/models` list and selects an available chat model instead of relying on a hardcoded default:
 
 ```lua
-local_adapter.setup({
-  provider = "openai",
-  -- api_key = "...", -- optional; defaults to OPENAI_API_KEY
-  -- model = "...",   -- optional; discovered from /v1/models when omitted
+require("neocode").setup({
+  adapters = {
+    openai = local_adapter.new({
+      name = "openai",
+      provider = "openai",
+      -- api_key = "...", -- optional; defaults to OPENAI_API_KEY
+      -- model = "...",   -- optional; discovered from /v1/models when omitted
+    }),
+  },
 })
 ```
 

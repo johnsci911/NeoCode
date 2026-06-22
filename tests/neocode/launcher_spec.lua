@@ -19,6 +19,21 @@ describe("launcher", function()
     assert.equals("  Llama (Continue)", labels.llama)
   end)
 
+  it("labels OpenAI-backed NeoCode adapters in the launcher", function()
+    local entries = launcher._entries({
+      adapters = {
+        openai = { name = "openai", type = "api", config = { provider = "openai" } },
+      },
+    })
+
+    local labels = {}
+    for _, entry in ipairs(entries) do
+      labels[entry.name] = entry.display
+    end
+
+    assert.equals("  NeoCode OpenAI", labels.openai)
+  end)
+
   it("shows NeoCode Local after default setup even when user config only registers Claude", function()
     neocode.setup({
       adapters = {

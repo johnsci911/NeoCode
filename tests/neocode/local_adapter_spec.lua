@@ -152,6 +152,24 @@ describe("local adapter", function()
     assert.equals("gpt-4o-mini", local_adapter.config.model)
   end)
 
+  it("creates configured adapter instances for launcher selection", function()
+    local openai_adapter = local_adapter.new({
+      name = "openai",
+      provider = "openai",
+      api_key = "test-key",
+      read_json = function()
+        return { data = { { id = "gpt-4o-mini" } } }
+      end,
+    })
+
+    assert.equals("openai", openai_adapter.name)
+    assert.equals("api", openai_adapter.type)
+    assert.equals("openai", openai_adapter.config.provider)
+    assert.equals("gpt-4o-mini", openai_adapter.model)
+    assert.is_function(openai_adapter.stream)
+    assert.is_function(openai_adapter.stream_with_tools)
+  end)
+
   it("uses probed provider metadata to populate model and context for compaction", function()
     local_adapter.setup({
       provider_probe = function()

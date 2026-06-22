@@ -8,6 +8,21 @@ local LABEL_MAP = {
   ["local"] = "  NeoCode Local",
 }
 
+local PROVIDER_LABELS = {
+  openai = "NeoCode OpenAI",
+  openai_compatible = "NeoCode Local",
+  llama_server = "NeoCode Local",
+}
+
+local function adapter_display(name, adapter)
+  if LABEL_MAP[name] then return LABEL_MAP[name] end
+  local provider = adapter and adapter.config and adapter.config.provider
+    or adapter and adapter.provider_name
+    or adapter and adapter.provider
+  if PROVIDER_LABELS[provider] then return "  " .. PROVIDER_LABELS[provider] end
+  return "  " .. name
+end
+
 local function ensure_builtin_adapters(config)
   config.adapters = config.adapters or {}
   if not config.adapters["local"] then
@@ -30,7 +45,7 @@ function M._entries(config)
 
   local entries = {}
   for _, name in ipairs(adapter_order) do
-    local display = LABEL_MAP[name] or ("  " .. name)
+    local display = adapter_display(name, config.adapters[name])
     table.insert(entries, { name = name, display = display })
   end
   return entries

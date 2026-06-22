@@ -310,6 +310,14 @@ function M.setup(opts)
   return M
 end
 
+function M.new(opts)
+  opts = opts or {}
+  M.setup(opts)
+  local instance = vim.tbl_extend("force", {}, M)
+  instance.name = opts.name or M.name
+  return instance
+end
+
 function M.refresh_metadata()
   ensure_setup()
   if not (M.provider and M.provider.probe_metadata) then return false end
