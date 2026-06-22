@@ -1577,6 +1577,30 @@ describe("session", function()
     assert.is_true(terminal["<M-n>r"])
   end)
 
+  it("sends Escape to CLI sessions instead of raw Ctrl-C", function()
+    local original_chansend = vim.fn.chansend
+    local sent_job = nil
+    local sent_data = nil
+    vim.fn.chansend = function(job_id, data)
+      sent_job = job_id
+      sent_data = data
+      return 1
+    end
+    local record = session._new_record("mockcli", "CLI")
+    record.job_id = 42
+    session._add(record)
+
+    local ok, err = pcall(function()
+      session._send_cli_escape(record)
+    end)
+
+    vim.fn.chansend = original_chansend
+    session._remove(record.id)
+    assert.is_true(ok, err)
+    assert.equals(42, sent_job)
+    assert.equals("\x1b", sent_data)
+  end)
+
   it("strips transient web-search system context from saved API messages", function()
     local messages = session._clean_api_messages({
       { role = "system", content = "web search results", _is_web_search = true },

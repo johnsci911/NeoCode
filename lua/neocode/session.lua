@@ -1240,6 +1240,11 @@ function M._interrupt_current_cli()
   if s and s.job_id then vim.fn.chansend(s.job_id, "\x03") end
 end
 
+function M._send_cli_escape(record)
+  local s = record or M._current()
+  if s and s.job_id then vim.fn.chansend(s.job_id, "\x1b") end
+end
+
 function M._register_session_namespace_keymaps(buf, config, cancel_fn, modes)
   local opts = { buffer = buf, silent = true }
   modes = modes or { "n" }
@@ -2553,9 +2558,9 @@ function M._register_buf_keymaps(buf, record, config)
     end
   end, opts)
 
-  -- Interrupt AI — both normal and terminal mode
+  -- Interrupt AI from normal mode; terminal Ctrl-C sends Escape into the CLI.
   vim.keymap.set("n", "<C-c>", M._interrupt_current_cli, opts)
-  vim.keymap.set("t", "<C-c>", M._interrupt_current_cli, opts)
+  vim.keymap.set("t", "<C-c>", function() M._send_cli_escape(record) end, opts)
 
   -- ? toggles hint overlay
   vim.keymap.set("n", "?", function()
