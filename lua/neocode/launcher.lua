@@ -44,6 +44,10 @@ function M.open(config)
   local function on_selected(e)
     local adapter = config.adapters[e.name]
     local n = #session._all() + 1
+    local current = session._current()
+    if current and current.winid then
+      session._mark_transient_session_open(current.winid)
+    end
     session.create(adapter, e.name .. " " .. n, config)
   end
 

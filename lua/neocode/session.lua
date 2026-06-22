@@ -174,6 +174,16 @@ local function window_shows_record(win, record)
     and vim.api.nvim_win_get_buf(win) == record.bufnr
 end
 
+local function window_has_transient_session_open(win)
+  return win and vim.api.nvim_win_is_valid(win) and vim.w[win].neocode_transient_session_open == true
+end
+
+function M._mark_transient_session_open(win)
+  if win and vim.api.nvim_win_is_valid(win) then
+    vim.w[win].neocode_transient_session_open = true
+  end
+end
+
 function M._show_session_in_window(record, win)
   if not record or not record.bufnr or not vim.api.nvim_buf_is_valid(record.bufnr) then return false end
   if not win or not vim.api.nvim_win_is_valid(win) then
@@ -194,6 +204,12 @@ function M._window_for_session_open(record)
     claim_window_for(record, win)
     return win
   elseif current and current.winid and vim.api.nvim_win_is_valid(current.winid) then
+    if window_has_transient_session_open(current.winid) then
+      local win = current.winid
+      vim.w[win].neocode_transient_session_open = nil
+      claim_window_for(record, win)
+      return win
+    end
     current.winid = nil
   end
 

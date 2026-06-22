@@ -1172,6 +1172,58 @@ describe("session", function()
     assert.is_true(ok, err)
   end)
 
+  it("spawns a new CLI session in the existing NeoCode window after launcher buffer focus", function()
+    local initial_win = vim.api.nvim_get_current_win()
+    local initial_windows = #vim.api.nvim_list_wins()
+    local old_termopen = vim.fn.termopen
+    vim.fn.termopen = function()
+      return 9002
+    end
+    local old_record = session._new_record("mockcli", "Old CLI")
+    old_record.bufnr = vim.api.nvim_create_buf(false, true)
+    old_record.winid = initial_win
+    session._add(old_record)
+    session._show_session_in_window(old_record, initial_win)
+    session._mark_transient_session_open(initial_win)
+    local launcher_buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_win_set_buf(initial_win, launcher_buf)
+    local adapter = {
+      name = "mockcli",
+      launch_cmd = function()
+        return { cmd = "mockcli", args = {} }
+      end,
+    }
+
+    local ok, err = pcall(function()
+      session.create(adapter, "New CLI", { winbar = "" })
+      local new_record = session._current()
+
+      assert.equals(initial_windows, #vim.api.nvim_list_wins())
+      assert.equals(initial_win, new_record.winid)
+      assert.equals(new_record.bufnr, vim.api.nvim_win_get_buf(initial_win))
+      assert.is_nil(old_record.winid)
+    end)
+
+    vim.fn.termopen = old_termopen
+    for _, s in ipairs(session._all()) do
+      if s.bufnr and vim.api.nvim_buf_is_valid(s.bufnr) then
+        pcall(vim.api.nvim_buf_delete, s.bufnr, { force = true })
+      end
+    end
+    if vim.api.nvim_buf_is_valid(launcher_buf) then
+      pcall(vim.api.nvim_buf_delete, launcher_buf, { force = true })
+    end
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      if win ~= initial_win and vim.api.nvim_win_is_valid(win) then
+        pcall(vim.api.nvim_win_close, win, true)
+      end
+    end
+    if vim.api.nvim_win_is_valid(initial_win) then
+      vim.api.nvim_set_current_win(initial_win)
+    end
+    assert.is_true(ok, err)
+  end)
+
   it("reuses the current NeoCode window when creating another API session", function()
     local initial_win = vim.api.nvim_get_current_win()
     local initial_windows = #vim.api.nvim_list_wins()
