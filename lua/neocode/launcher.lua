@@ -2,7 +2,6 @@ local M = {}
 
 local LABEL_MAP = {
   opencode = "  OpenCode",
-  llama = "  Llama (Continue)",
   pi = "  Pi",
 }
 
