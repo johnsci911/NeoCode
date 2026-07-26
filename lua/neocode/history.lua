@@ -5,10 +5,7 @@ function M._build_entries(config)
   local all = session.load_all_from_disk(config)
   local active_map = {}
   for _, s in ipairs(session._all()) do
-    local is_api_session = s.messages ~= nil or s.api_adapter ~= nil
-    if is_api_session and (not s.messages or #s.messages == 0) then goto skip_mem end
     active_map[s.id] = s
-    ::skip_mem::
   end
 
   local entries = {}
@@ -96,7 +93,9 @@ function M.pick(config)
 
         if sel.status == "active" then
           local active = session._get(sel.id)
-          session._show_session_in_window(active, vim.api.nvim_get_current_win())
+          if active then
+            session._show_session_in_window(active, vim.api.nvim_get_current_win())
+          end
         else
           local adapter = config.adapters and config.adapters[sel.adapter]
           if not adapter then
@@ -104,13 +103,6 @@ function M.pick(config)
             return
           end
 
-          -- API adapters: resume by loading saved messages
-          if adapter.type == "api" then
-            session.resume_api(adapter, sel, config)
-            return
-          end
-
-          -- CLI adapters: resume via adapter's resume_cmd
           if not adapter.resume_cmd then
             vim.notify("neocode: adapter '" .. sel.adapter .. "' does not support resume", vim.log.levels.ERROR)
             return
@@ -148,10 +140,6 @@ function M.pick(config)
             end
           else
             session.delete_from_disk(sel.id, config)
-            -- Also delete the llama session messages file
-            local llama_session = require("neocode.llama_session")
-            local history_dir = config.data_dir .. "/llama"
-            llama_session.delete(history_dir, sel.id)
             deleted = deleted + 1
           end
         end

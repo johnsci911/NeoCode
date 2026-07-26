@@ -6,7 +6,7 @@ describe("history picker entries", function()
     session._reset()
   end)
 
-  it("includes active CLI sessions even without messages", function()
+  it("includes active CLI sessions", function()
     local record = session._new_record("opencode", "OpenCode active")
     record.bufnr = vim.api.nvim_create_buf(false, true)
     session._add(record)
@@ -17,16 +17,6 @@ describe("history picker entries", function()
     assert.equals(1, #entries)
     assert.equals(record.id, entries[1].id)
     assert.equals("active", entries[1].status)
-  end)
-
-  it("keeps empty API sessions out of history", function()
-    local record = session._new_record("local", "Empty API")
-    record.messages = {}
-    session._add(record)
-
-    local entries = history._build_entries({ data_dir = vim.fn.tempname(), adapters = {} })
-
-    assert.equals(0, #entries)
   end)
 
   it("maps delete in both normal and insert mode for the telescope picker", function()
@@ -85,8 +75,7 @@ describe("history picker entries", function()
     local old_schedule = vim.schedule
     local mapped = {}
     local closed = false
-    local record = session._new_record("local", "Active API")
-    record.messages = { { role = "user", content = "hello" } }
+    local record = session._new_record("opencode", "Active Session")
     record.bufnr = vim.api.nvim_create_buf(false, true)
     session._add(record)
 

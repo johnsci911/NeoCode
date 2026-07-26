@@ -1,48 +1,18 @@
 local M = {}
 
 local LABEL_MAP = {
-  claude = "  Claude CLI",
   opencode = "  OpenCode",
-  gemini = "  Gemini CLI",
   llama = "  Llama (Continue)",
-  ["local"] = "  NeoCode Local",
+  pi = "  Pi",
 }
 
-local PROVIDER_LABELS = {
-  openai = "NeoCode OpenAI",
-  openai_compatible = "NeoCode Local",
-  llama_server = "NeoCode Local",
-}
-
-local function adapter_display(name, adapter)
+local function adapter_display(name)
   if LABEL_MAP[name] then return LABEL_MAP[name] end
-  local provider = adapter and adapter.config and adapter.config.provider
-    or adapter and adapter.provider_name
-    or adapter and adapter.provider
-  if PROVIDER_LABELS[provider] then return "  " .. PROVIDER_LABELS[provider] end
   return "  " .. name
-end
-
-local function ensure_builtin_adapters(config)
-  config.adapters = config.adapters or {}
-  local ok, local_adapter = pcall(require, "neocode.adapters.local")
-  if ok then
-    if not config.adapters["local"] then
-      config.adapters["local"] = local_adapter
-    end
-    if not config.adapters.openai then
-      config.adapters.openai = local_adapter.new({
-        name = "openai",
-        provider = "openai",
-        lazy = true,
-      })
-    end
-  end
 end
 
 function M._entries(config)
   config = config or {}
-  ensure_builtin_adapters(config)
 
   local adapter_order = {}
   for name in pairs(config.adapters or {}) do
@@ -52,7 +22,7 @@ function M._entries(config)
 
   local entries = {}
   for _, name in ipairs(adapter_order) do
-    local display = adapter_display(name, config.adapters[name])
+    local display = adapter_display(name)
     table.insert(entries, { name = name, display = display })
   end
   return entries

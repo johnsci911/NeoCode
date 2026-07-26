@@ -1,37 +1,21 @@
 local M = {}
 
-local REQUIRED_CLI_FIELDS = { "name", "launch_cmd", "interrupt", "attach_image", "session_store" }
-local REQUIRED_API_FIELDS = { "name", "stream", "stream_with_tools", "_build_user_message", "session_store" }
+local REQUIRED_FIELDS = { "name", "launch_cmd", "interrupt", "attach_image", "session_store" }
 
 local DEFAULT_CONFIG = {
-  default_adapter    = "claude",
+  default_adapter    = "opencode",
   keymap_prefix      = "<leader>ai",
   data_dir           = vim.fn.stdpath("data") .. "/neocode",
   telescope_fallback = true,
   winbar             = "  ? help  /session history  i input  <M-n>r rename  <M-n>c stop  <M-n>q close  <C-p> image  H toggle  { } cycle\n",
   adapters           = {},
-  auto_compact       = {
-    threshold = 0.8,
-    preserve_recent_turns = 4,
-  },
 }
 
 M._config      = {}
 M._initialized = false
 
-local function register_builtin_adapters(config)
-  config.adapters = config.adapters or {}
-  if not config.adapters["local"] then
-    local ok, local_adapter = pcall(require, "neocode.adapters.local")
-    if ok then
-      config.adapters["local"] = local_adapter
-    end
-  end
-end
-
 local function validate_adapter(name, adapter)
-  local fields = adapter.type == "api" and REQUIRED_API_FIELDS or REQUIRED_CLI_FIELDS
-  for _, field in ipairs(fields) do
+  for _, field in ipairs(REQUIRED_FIELDS) do
     if adapter[field] == nil then
       error(string.format("neocode: adapter '%s' is missing required field '%s'", name, field))
     end
@@ -51,7 +35,6 @@ end
 
 function M.setup(opts)
   M._config = vim.tbl_deep_extend("force", DEFAULT_CONFIG, opts or {})
-  register_builtin_adapters(M._config)
 
   for name, adapter in pairs(M._config.adapters) do
     validate_adapter(name, adapter)

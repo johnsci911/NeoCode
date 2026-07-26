@@ -1,12 +1,10 @@
 local launcher = require("neocode.launcher")
-local neocode = require("neocode")
 
 describe("launcher", function()
-  it("labels NeoCode Local distinctly from Continue/Llama", function()
+  it("labels OpenCode distinctly", function()
     local entries = launcher._entries({
       adapters = {
-        llama = { name = "llama" },
-        ["local"] = { name = "local", type = "api" },
+        opencode = { name = "opencode" },
       },
     })
 
@@ -15,14 +13,13 @@ describe("launcher", function()
       labels[entry.name] = entry.display
     end
 
-    assert.equals("  NeoCode Local", labels["local"])
-    assert.equals("  Llama (Continue)", labels.llama)
+    assert.equals("  OpenCode", labels.opencode)
   end)
 
-  it("labels OpenAI-backed NeoCode adapters in the launcher", function()
+  it("labels Pi distinctly", function()
     local entries = launcher._entries({
       adapters = {
-        openai = { name = "openai", type = "api", config = { provider = "openai" } },
+        pi = { name = "pi" },
       },
     })
 
@@ -31,40 +28,40 @@ describe("launcher", function()
       labels[entry.name] = entry.display
     end
 
-    assert.equals("  NeoCode OpenAI", labels.openai)
+    assert.equals("  Pi", labels.pi)
   end)
 
-  it("shows NeoCode Local after default setup even when user config only registers Claude", function()
-    neocode.setup({
+  it("shows unknown adapters with their name prefixed by two spaces", function()
+    local entries = launcher._entries({
       adapters = {
-        claude = require("neocode.adapters.claude"),
+        custom = { name = "custom" },
       },
     })
 
     local labels = {}
-    for _, entry in ipairs(launcher._entries(neocode._config)) do
+    for _, entry in ipairs(entries) do
       labels[entry.name] = entry.display
     end
 
-    assert.equals("  NeoCode Local", labels["local"])
-    assert.equals("  NeoCode OpenAI", labels.openai)
+    assert.equals("  custom", labels.custom)
   end)
 
-  it("self-heals stale launcher configs that do not include built-in NeoCode API adapters", function()
-    local stale_config = {
+  it("sorts adapters alphabetically", function()
+    local entries = launcher._entries({
       adapters = {
-        claude = require("neocode.adapters.claude"),
+        pi = { name = "pi" },
+        opencode = { name = "opencode" },
+        custom = { name = "custom" },
       },
-    }
+    })
 
-    local labels = {}
-    for _, entry in ipairs(launcher._entries(stale_config)) do
-      labels[entry.name] = entry.display
-    end
+    assert.equals("custom", entries[1].name)
+    assert.equals("opencode", entries[2].name)
+    assert.equals("pi", entries[3].name)
+  end)
 
-    assert.equals("  NeoCode Local", labels["local"])
-    assert.equals("  NeoCode OpenAI", labels.openai)
-    assert.is_table(stale_config.adapters["local"])
-    assert.is_table(stale_config.adapters.openai)
+  it("returns empty list when no adapters configured", function()
+    local entries = launcher._entries({ adapters = {} })
+    assert.equals(0, #entries)
   end)
 end)

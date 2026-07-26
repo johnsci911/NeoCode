@@ -62,28 +62,6 @@ local function read_json(path, fallback)
   return fallback
 end
 
-local function json_exists(path)
-  return vim.fn.filereadable(path) == 1
-end
-
-local function write_text(path, text)
-  ensure_dir(vim.fn.fnamemodify(path, ":h"))
-  local f = io.open(path, "w")
-  if not f then return false end
-  f:write(text or "")
-  f:close()
-  protect_file(path)
-  return true
-end
-
-local function read_text(path)
-  local f = io.open(path, "r")
-  if not f then return "" end
-  local raw = f:read("*a")
-  f:close()
-  return raw
-end
-
 function M.new(config)
   config = config or {}
   local data_dir = config.data_dir or vim.fn.stdpath("data") .. "/neocode"
@@ -112,57 +90,6 @@ function M.new(config)
 
   function store.load_meta(session_id)
     return read_json(join(store.session_dir(session_id), "meta.json"), nil)
-  end
-
-  function store.save_messages(session_id, messages)
-    return write_json(join(store.session_dir(session_id), "messages.json"), messages or {})
-  end
-
-  function store.messages_path(session_id)
-    return join(store.session_dir(session_id), "messages.json")
-  end
-
-  function store.has_messages(session_id)
-    return json_exists(store.messages_path(session_id))
-  end
-
-  function store.load_messages(session_id)
-    return read_json(store.messages_path(session_id), {})
-  end
-
-  function store.append_transcript(session_id, event)
-    if not session_id or not event then return false end
-    local path = join(store.session_dir(session_id), "transcript.jsonl")
-    ensure_dir(vim.fn.fnamemodify(path, ":h"))
-    local f = io.open(path, "a")
-    if not f then return false end
-    local item = vim.deepcopy(event)
-    item.timestamp = item.timestamp or os.time()
-    local ok, encoded = pcall(vim.fn.json_encode, item)
-    if not ok then
-      f:close()
-      return false
-    end
-    f:write(encoded .. "\n")
-    f:close()
-    protect_file(path)
-    return true
-  end
-
-  function store.save_summary(session_id, summary)
-    return write_text(join(store.session_dir(session_id), "summary.md"), summary or "")
-  end
-
-  function store.load_summary(session_id)
-    return read_text(join(store.session_dir(session_id), "summary.md"))
-  end
-
-  function store.save_state(session_id, state)
-    return write_json(join(store.session_dir(session_id), "state.json"), state or {})
-  end
-
-  function store.load_state(session_id)
-    return read_json(join(store.session_dir(session_id), "state.json"), {})
   end
 
   function store.delete_session(session_id)
