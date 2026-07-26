@@ -14,6 +14,22 @@ local DEFAULT_CONFIG = {
 M._config      = {}
 M._initialized = false
 
+local function adapter_available(name)
+  local cmd = vim.fn.executable(name)
+  return cmd == 1
+end
+
+local function auto_detect_adapters()
+  local adapters = {}
+  if adapter_available("opencode") then
+    adapters.opencode = require("neocode.adapters.opencode")
+  end
+  if adapter_available("pi") then
+    adapters.pi = require("neocode.adapters.pi")
+  end
+  return adapters
+end
+
 local function validate_adapter(name, adapter)
   for _, field in ipairs(REQUIRED_FIELDS) do
     if adapter[field] == nil then
@@ -34,7 +50,11 @@ function M._register_global_keymaps()
 end
 
 function M.setup(opts)
-  M._config = vim.tbl_deep_extend("force", DEFAULT_CONFIG, opts or {})
+  opts = opts or {}
+  if not opts.adapters or next(opts.adapters) == nil then
+    opts.adapters = auto_detect_adapters()
+  end
+  M._config = vim.tbl_deep_extend("force", DEFAULT_CONFIG, opts)
 
   for name, adapter in pairs(M._config.adapters) do
     validate_adapter(name, adapter)
